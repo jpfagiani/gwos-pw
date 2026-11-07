@@ -26,12 +26,14 @@ function config(string $chave, mixed $padrao = null): mixed
 
 function view(string $template, array $dados = []): void
 {
-    extract($dados, EXTR_SKIP);
-    $arquivo = BASE_PATH . '/app/Views/' . $template . '.php';
-    if (!file_exists($arquivo)) {
+    $__arquivo = BASE_PATH . '/app/Views/' . $template . '.php';
+    if (!file_exists($__arquivo)) {
         throw new \RuntimeException("View não encontrada: {$template}");
     }
-    require $arquivo;
+    $__vars = $dados;
+    unset($dados);
+    extract($__vars, EXTR_SKIP);
+    require $__arquivo;
 }
 
 function redirect(string $uri, int $codigo = 302): never
@@ -101,4 +103,11 @@ function formatar_bytes(int $bytes): string
         $i++;
     }
     return round($bytes, 2) . ' ' . $unidades[$i];
+}
+
+/** Perfis com escrita no painel (o operador é somente leitura). */
+function pode_editar(): bool
+{
+    $perfil = \App\Core\Auth::admin()['perfil'] ?? '';
+    return $perfil !== '' && $perfil !== 'operador';
 }

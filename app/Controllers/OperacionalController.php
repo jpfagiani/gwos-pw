@@ -45,6 +45,10 @@ class OperacionalController extends Controller
             else { $sessao=Database::fetch('SELECT id FROM sessoes_internet WHERE ip=? AND expira_em>NOW()',[$ip]); if($sessao){$decisao='permitir';$motivo='Existe sessão válida do portal para este IP.';} else {$decisao='login necessário';$motivo='Sem grupo permissivo ou sessão válida; o Squid encaminha ao portal.';} }
             $resultado=['grupo'=>$grupo,'regras'=>$match,'vencedora'=>$vencedora,'dominio_regra'=>$dominioRegra,'decisao'=>$decisao,'motivo'=>$motivo,'destino'=>$destino,'protocolo'=>$protocolo,'porta'=>$porta,'aviso'=>'Simulação baseada em políticas registradas e na ordem do squid.conf. Não consulta a configuração carregada do Squid; listas SNI, destinos resolvidos e estado de rede podem diferir.'];
         }
+        if (isset($_GET['json'])) {
+            if (!$resultado) json_resposta(['erro'=>'Informe um IP válido do equipamento.'],422);
+            json_resposta(['decisao'=>$resultado['decisao'],'motivo'=>$resultado['motivo'],'grupo'=>$resultado['grupo']['nome']??null,'destino'=>$resultado['destino'],'aviso'=>$resultado['aviso']]);
+        }
         $this->view('operacional/simulador',compact('ip','quando','destino','protocolo','porta','resultado'));
     }
     private function prefixoRede(string $rede): int { [$base,$bits]=array_pad(explode('/',$rede,2),2,null); return $bits!==null&&ctype_digit($bits)?(int)$bits:(filter_var($base,FILTER_VALIDATE_IP,FILTER_FLAG_IPV6)?128:32); }

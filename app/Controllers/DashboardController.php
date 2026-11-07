@@ -36,9 +36,60 @@ class DashboardController extends Controller
             'disco' => self::discoSistema(),
             'uptime' => self::uptimeSistema(),
             'conn'   => (int)(Database::valor('SELECT COUNT(DISTINCT ip_cliente) FROM relatorio_diario WHERE data = CURDATE()') ?? 0),
+            'wan'    => \App\Core\Monitoramento::interfaceInfo($ifaceWan),
+            'lan'    => \App\Core\Monitoramento::interfaceInfo($ifaceLan),
+            'acessos' => self::acessosRecentes(6),
             'log'    => self::lerLogSquid(100),
         ]);
         exit;
+    }
+
+    /** GET /ping — pulso leve do cabeçalho/rodapé. */
+    public function ping(): void
+    {
+        Auth::exigir();
+        json_resposta(['ok' => true, 'hora' => date('d/m/Y H:i:s')]);
+    }
+
+    /** GET /dashboard/servicos — estado dos serviços dos módulos instalados. */
+    public function servicos(): void
+    {
+        Auth::exigir();
+        json_resposta(['servicos' => self::servicosRotulados($this->statusServicos()), 'coletado_em' => date('H:i:s')]);
+    }
+
+    private static function nomeServico(string $svc): string
+    {
+        return [
+            'named' => 'DNS (BIND9)', 'gwos-dnsmasq' => 'DNS interno / DHCP (dnsmasq)', 'nftables' => 'Firewall (nftables)',
+            'squid' => 'Proxy (Squid)', 'chrony' => 'Hora (Chrony)', 'mariadb' => 'Banco (MariaDB)', 'nginx' => 'Painel (Nginx)',
+            'smbd' => 'Samba', 'isc-dhcp-server' => 'DHCP', 'kea-dhcp4-server' => 'DHCP (Kea)',
+        ][$svc] ?? (str_starts_with($svc, 'php') ? 'PHP-FPM' : $svc);
+    }
+
+    private static function servicosRotulados(array $status): array
+    {
+        $r = [];
+        foreach ($status as $svc => $ativo) $r[] = ['id' => $svc, 'nome' => self::nomeServico($svc), 'ativo' => (bool) $ativo];
+        return $r;
+    }
+
+    /** Últimos acessos importados do Squid (banco), com equipamento e usuário. */
+    private static function acessosRecentes(int $n): array
+    {
+        $linhas = \App\Core\Monitoramento::acessos(['periodo' => '24h'], $n);
+        $r = [];
+        foreach ($linhas as $a) {
+            $negado = str_contains((string) $a['status'], 'DENIED') || str_contains((string) $a['status'], 'BLOCKED');
+            $r[] = [
+                'ip' => $a['ip'], 'equipamento' => ($a['hostname'] ?? '') !== '' ? $a['hostname'] : '—',
+                'usuario' => ($a['email'] ?? '') !== '' ? $a['email'] : '—', 'destino' => $a['dominio'] ?: '—',
+                'download' => (int) $a['bytes'], 'upload' => $a['request_bytes'] === null ? null : (int) $a['request_bytes'],
+                'protocolo' => strtoupper((string) ($a['protocolo'] ?? '')), 'hora' => date('H:i:s', strtotime((string) $a['ocorrido_em'])),
+                'negado' => $negado,
+            ];
+        }
+        return $r;
     }
 
     private static function contadores(string $iface): array
@@ -54,14 +105,14 @@ class DashboardController extends Controller
         ];
     }
 
-    private static function cargaSistema(): ?string
+    public static function cargaSistema(): ?string
     {
         $raw = @file_get_contents('/proc/loadavg');
         if ($raw === false || !preg_match('/^(\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s+\d+(?:\.\d+)?)/', $raw, $m)) return null;
         return $m[1];
     }
 
-    private static function memoriaSistema(): ?array
+    public static function memoriaSistema(): ?array
     {
         $raw = @file_get_contents('/proc/meminfo');
         if ($raw === false || !preg_match('/^MemTotal:\s+(\d+)/m', $raw, $total) || !preg_match('/^MemAvailable:\s+(\d+)/m', $raw, $livre)) return null;
@@ -71,7 +122,7 @@ class DashboardController extends Controller
             'usada_mb' => round($usadaKb / 1024), 'total_mb' => round($totalKb / 1024)];
     }
 
-    private static function discoSistema(): ?array
+    public static function discoSistema(): ?array
     {
         $total = @disk_total_space('/');
         $livre = @disk_free_space('/');
@@ -80,7 +131,7 @@ class DashboardController extends Controller
             'usada_gb' => round(($total - $livre) / 1073741824, 1), 'total_gb' => round($total / 1073741824, 1)];
     }
 
-    private static function uptimeSistema(): ?int
+    public static function uptimeSistema(): ?int
     {
         $raw = @file_get_contents('/proc/uptime');
         return $raw !== false && preg_match('/^(\d+(?:\.\d+)?)/', $raw, $m) ? (int) $m[1] : null;
@@ -191,27 +242,45 @@ class DashboardController extends Controller
         }
 
         $servicos = $this->statusServicos();
+        $servicosLista = self::servicosRotulados($servicos);
 
-        $totalIps      = (int) Database::valor('SELECT COUNT(*) FROM ips WHERE ativo = 1');
-        $totalGrupos   = (int) Database::valor('SELECT COUNT(*) FROM ip_grupos WHERE ativo = 1');
-        $totalDominios = (int) Database::valor('SELECT COUNT(*) FROM dominios WHERE ativo = 1');
-        $totalNat      = (int) Database::valor('SELECT COUNT(*) FROM nat_um_para_um');
+        $cfg = static fn(string $k): string => (string) (Database::valor('SELECT valor FROM configuracoes WHERE chave=?', [$k]) ?? '');
+        $ifWan = $cfg('iface_wan');
+        if ($ifWan === '') $ifWan = trim((string) shell_exec("ip route show default 2>/dev/null | awk '{print \$5;exit}'"));
+        $ifLan = $cfg('iface_lan');
+        $wan = \App\Core\Monitoramento::interfaceInfo($ifWan);
+        $lan = \App\Core\Monitoramento::interfaceInfo($ifLan);
+        $hist24 = \App\Core\Monitoramento::historico24h($ifWan);
 
-        $ultimosAcessos = self::lerUltimosAcessos(25);
-        $totalEquipamentos = (int) Database::valor('SELECT COUNT(*) FROM equipamentos');
-        $sessoesAtivas = (int) Database::valor('SELECT COUNT(*) FROM sessoes_internet WHERE expira_em > NOW()');
+        $conectados = (int) Database::valor('SELECT COUNT(*) FROM equipamentos WHERE atualizado_em >= NOW() - INTERVAL 15 MINUTE');
         $bloqueiosHoje = (int) Database::valor("SELECT COUNT(*) FROM acessos_internet WHERE DATE(ocorrido_em)=CURDATE() AND (status LIKE '%DENIED%' OR status LIKE '%BLOCKED%')");
-        $bytesHoje = (int) Database::valor('SELECT COALESCE(SUM(bytes),0) FROM acessos_internet WHERE ocorrido_em >= CURDATE()');
-        $uploadHoje = Database::valor('SELECT SUM(request_bytes) FROM acessos_internet WHERE ocorrido_em >= CURDATE()');
+        $sessoesAtivas = (int) Database::valor('SELECT COUNT(*) FROM sessoes_internet WHERE expira_em > NOW()');
         $alertasAbertos = (int) Database::valor("SELECT COUNT(*) FROM alertas WHERE estado='aberto'");
-        $rankingHoje = \App\Core\Monitoramento::ranking('24h', 5);
-        $alertasRecentes = Database::fetchAll("SELECT id,severidade,titulo,mensagem,estado,atualizado_em FROM alertas WHERE estado<>'resolvido' ORDER BY FIELD(severidade,'critico','aviso','info'), atualizado_em DESC LIMIT 5");
-        $historicoLAN = \App\Core\Monitoramento::historicoRede((string)(Database::valor("SELECT valor FROM configuracoes WHERE chave='iface_lan'")??''));
-        $historicoWAN = \App\Core\Monitoramento::historicoRede((string)(Database::valor("SELECT valor FROM configuracoes WHERE chave='iface_wan'")??''));
+
+        $inativos = count(array_filter($servicos, static fn($a) => !$a));
+        if (!$servicos) { $estado = ['nd', 'Sem dados', 'Nenhum serviço registrado para verificar.']; }
+        elseif ($wan['existe'] && $wan['estado'] !== null && $wan['estado'] !== 'up' && $wan['estado'] !== 'unknown') { $estado = ['erro', 'WAN sem link', 'A interface WAN não está ativa.']; }
+        elseif ($inativos > 0) { $estado = ['aviso', 'Atenção', $inativos . ' serviço(s) parado(s)']; }
+        else { $estado = ['ok', 'Rede Operacional', 'Tudo funcionando normalmente']; }
+
+        $rankingHoje = \App\Core\Monitoramento::ranking('24h', 10);
+        $alertasRecentes = Database::fetchAll("SELECT id,severidade,titulo,mensagem,estado,atualizado_em FROM alertas WHERE estado<>'resolvido' ORDER BY FIELD(severidade,'critico','aviso','info'), atualizado_em DESC LIMIT 4");
+        $acessosRecentes = self::acessosRecentes(6);
+
+        $gruposTipo = ['liberado' => 0, 'parcial' => 0, 'bloqueado' => 0];
+        foreach (Database::fetchAll("SELECT g.tipo, COUNT(i.id) q FROM ip_grupos g LEFT JOIN ips i ON i.grupo_id=g.id AND i.ativo=1 AND (i.expira_em IS NULL OR i.expira_em>NOW()) WHERE g.ativo=1 GROUP BY g.tipo") as $g) {
+            if (isset($gruposTipo[$g['tipo']])) $gruposTipo[$g['tipo']] = (int) $g['q'];
+        }
+        $agenda = Database::fetchAll('SELECT h.nome,h.acao,h.hora_inicio,h.hora_fim,h.dias_semana,g.nome grupo_nome FROM horarios h LEFT JOIN ip_grupos g ON g.id=h.grupo_id WHERE h.ativo=1 ORDER BY h.hora_inicio,h.id LIMIT 5');
+
+        $equipamentos = array_slice(\App\Core\Monitoramento::dispositivos(), 0, 400);
+        usort($equipamentos, static fn($a, $b) => strcmp((string) ($b['ultimo_acesso'] ?? ''), (string) ($a['ultimo_acesso'] ?? '')));
+        $equipamentos = array_slice($equipamentos, 0, 5);
+        $gruposAcao = \App\Core\Politicas::grupos();
 
         $this->view('dashboard/index', compact(
-            'servicos', 'totalIps', 'totalGrupos', 'totalDominios', 'totalNat', 'ultimosAcessos',
-            'totalEquipamentos','sessoesAtivas','bloqueiosHoje','bytesHoje','uploadHoje','alertasAbertos','rankingHoje','alertasRecentes','historicoLAN','historicoWAN'
+            'servicosLista', 'wan', 'lan', 'hist24', 'conectados', 'bloqueiosHoje', 'sessoesAtivas', 'alertasAbertos', 'estado',
+            'rankingHoje', 'alertasRecentes', 'acessosRecentes', 'gruposTipo', 'agenda', 'equipamentos', 'gruposAcao'
         ));
     }
 

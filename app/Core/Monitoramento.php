@@ -6,7 +6,12 @@ class Monitoramento
 {
     public static function janela(string $janela): string
     {
-        return match ($janela) { '1h'=>'1 HOUR', '7d'=>'7 DAY', '30d'=>'30 DAY', default=>'24 HOUR' };
+        return match ($janela) {
+            '1h'=>'1 HOUR', '7d'=>'7 DAY', '30d'=>'30 DAY',
+            'hoje'=>'TIMESTAMPDIFF(SECOND, CURDATE(), NOW()) SECOND',
+            'mes'=>"TIMESTAMPDIFF(SECOND, DATE_FORMAT(CURDATE(),'%Y-%m-01'), NOW()) SECOND",
+            default=>'24 HOUR'
+        };
     }
 
     public static function ranking(string $janela = '24h', int $limite = 10): array
@@ -141,5 +146,45 @@ class Monitoramento
         return ['labels'=>$labels,'rx'=>$rx,'tx'=>$tx];
     }
 
-    public static function periodosPermitidos(): array { return ['1h'=>'Última hora','24h'=>'24 horas','7d'=>'7 dias','30d'=>'30 dias']; }
+    public static function periodosPermitidos(): array { return ['1h'=>'Última hora','hoje'=>'Hoje','24h'=>'24 horas','7d'=>'7 dias','mes'=>'Mês atual','30d'=>'30 dias']; }
+
+    /**
+     * Série das últimas 24 h em 48 faixas de 30 min (bps = delta*8/segundos).
+     * Lacunas > 10 min e contador reiniciado viram "sem dados" (null), nunca zero.
+     */
+    public static function historico24h(string $interface): array
+    {
+        $vazio=['labels'=>[],'rx'=>[],'tx'=>[],'ultima'=>null,'amostras'=>0];
+        if(!preg_match('/^[a-zA-Z0-9_.:-]{1,32}$/',$interface)) return $vazio;
+        $rows=Database::fetchAll('SELECT rx_bytes,tx_bytes,UNIX_TIMESTAMP(coletado_em) t FROM metricas_rede WHERE interface=? AND coletado_em>=NOW()-INTERVAL 24 HOUR ORDER BY coletado_em',[$interface]);
+        if(count($rows)<2) return $vazio+[];
+        $faixa=1800; $agora=time(); $inicio=$agora-48*$faixa; $soma=[]; 
+        for($i=1;$i<count($rows);$i++){
+            $dt=(int)$rows[$i]['t']-(int)$rows[$i-1]['t'];
+            if($dt<=0||$dt>600) continue;
+            $drx=(int)$rows[$i]['rx_bytes']-(int)$rows[$i-1]['rx_bytes']; $dtx=(int)$rows[$i]['tx_bytes']-(int)$rows[$i-1]['tx_bytes'];
+            if($drx<0||$dtx<0) continue;
+            $k=(int)floor(((int)$rows[$i]['t']-$inicio)/$faixa); if($k<0||$k>47) continue;
+            $soma[$k]['rx']=($soma[$k]['rx']??0)+$drx*8; $soma[$k]['tx']=($soma[$k]['tx']??0)+$dtx*8; $soma[$k]['s']=($soma[$k]['s']??0)+$dt;
+        }
+        $labels=[];$rx=[];$tx=[];
+        for($k=0;$k<48;$k++){
+            $labels[]=date('H:i',$inicio+$k*$faixa);
+            if(isset($soma[$k])&&$soma[$k]['s']>0){ $rx[]=round($soma[$k]['rx']/$soma[$k]['s'],1); $tx[]=round($soma[$k]['tx']/$soma[$k]['s'],1); }
+            else { $rx[]=null; $tx[]=null; }
+        }
+        return ['labels'=>$labels,'rx'=>$rx,'tx'=>$tx,'ultima'=>date('H:i:s',(int)end($rows)['t']),'amostras'=>count($rows)];
+    }
+
+    /** Estado operacional de uma interface (somente leitura de /sys). */
+    public static function interfaceInfo(string $interface): array
+    {
+        $r=['nome'=>$interface,'existe'=>false,'estado'=>null,'ip'=>null];
+        if(!preg_match('/^[a-zA-Z0-9_.:-]{1,32}$/',$interface)||!is_dir('/sys/class/net/'.$interface)) return $r;
+        $r['existe']=true;
+        $op=@file_get_contents('/sys/class/net/'.$interface.'/operstate'); $r['estado']=$op!==false?trim($op):null;
+        $saida=[];$cod=1; @exec('ip -4 -o addr show dev '.escapeshellarg($interface).' 2>/dev/null',$saida,$cod);
+        if($saida && preg_match('/inet\s+([0-9.]+)/',$saida[0],$m)) $r['ip']=$m[1];
+        return $r;
+    }
 }

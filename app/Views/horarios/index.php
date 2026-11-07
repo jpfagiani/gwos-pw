@@ -1,7 +1,8 @@
 <?php $titulo = 'Horários'; $modulo = 'horarios';
 $diasNomes = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+if (!function_exists('formatarDias')) {
 function formatarDias(string $dias): string {
-    global $diasNomes;
+    $diasNomes = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
     $out = [];
     for ($i = 0; $i < 7; $i++) {
         if (isset($dias[$i]) && $dias[$i] === '1') {
@@ -9,6 +10,7 @@ function formatarDias(string $dias): string {
         }
     }
     return implode(' ', $out);
+}
 }
 ?>
 

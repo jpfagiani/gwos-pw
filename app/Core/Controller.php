@@ -6,15 +6,20 @@ class Controller
 {
     protected function view(string $nome, array $dados = []): void
     {
-        $arquivoView = BASE_PATH . '/app/Views/' . $nome . '.php';
+        // Os parâmetros ficam com nomes que nenhuma view usa: com EXTR_SKIP,
+        // uma variável de view chamada "dados" (ex.: ranking) não era
+        // sobrescrita e virava o array inteiro de variáveis.
+        $__arquivoView = BASE_PATH . '/app/Views/' . $nome . '.php';
+        $__vars = $dados;
+        unset($dados, $nome);
 
         ob_start();
-        extract($dados, EXTR_SKIP);
-        require $arquivoView;
+        extract($__vars, EXTR_SKIP);
+        require $__arquivoView;
         $conteudo = ob_get_clean();
 
-        $dados['conteudo'] = $conteudo;
-        extract($dados, EXTR_SKIP);
+        $__vars['conteudo'] = $conteudo;
+        extract($__vars, EXTR_SKIP);
         require BASE_PATH . '/app/Views/layout.php';
     }
 
