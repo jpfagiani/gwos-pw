@@ -78,3 +78,11 @@ $router->post('/internet/teste-email',              'InternetController@testeEma
 $router->post('/internet/sessoes/{id}/derrubar',    'InternetController@derrubar');
 $router->post('/internet/usuarios/{id}/alternar',   'InternetController@alternar');
 $router->post('/internet/usuarios/{id}/excluir',    'InternetController@excluir');
+
+$router->get('/ping', 'DashboardController@ping');
+$router->get('/dashboard/servicos', 'DashboardController@servicos');
+$router->get('/politicas', 'PoliticaController@index');
+$router->post('/politicas/acao', 'PoliticaController@acao');
+$router->get('/diagnostico', 'SuporteController@diagnostico');
+$router->get('/ajuda', 'SuporteController@ajuda');
+$router->get('/busca', 'SuporteController@busca');

@@ -10,12 +10,12 @@ function fecharMenu() {
     sidebar?.classList.remove('aberto');
     navBackdrop?.classList.remove('visivel');
     sidebarToggle?.setAttribute('aria-expanded', 'false');
-    if (window.matchMedia('(max-width: 767.98px)').matches && sidebar) sidebar.inert = true;
+    if (window.matchMedia('(max-width: 991.98px)').matches && sidebar) sidebar.inert = true;
 }
-if (window.matchMedia('(max-width: 767.98px)').matches && sidebar) sidebar.inert = true;
+if (window.matchMedia('(max-width: 991.98px)').matches && sidebar) sidebar.inert = true;
 sidebarToggle?.addEventListener('click', () => {
     const aberto = sidebar?.classList.toggle('aberto') ?? false;
-    if (sidebar && window.matchMedia('(max-width: 767.98px)').matches) sidebar.inert = !aberto;
+    if (sidebar && window.matchMedia('(max-width: 991.98px)').matches) sidebar.inert = !aberto;
     navBackdrop?.classList.toggle('visivel', aberto);
     sidebarToggle.setAttribute('aria-expanded', String(aberto));
     if (aberto) sidebar?.querySelector('a, button')?.focus();

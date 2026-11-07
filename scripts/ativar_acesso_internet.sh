@@ -38,7 +38,7 @@ MYSQL=(mysql -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" "$DB_BANCO")
 
 # 1. Banco ------------------------------------------------------------------
 info "Aplicando a migração do banco..."
-for mig in "$RAIZ"/database/migrations/002_acesso_internet.sql "$RAIZ"/database/migrations/004_operacional_v2.sql "$RAIZ"/database/migrations/005_trafego_direcional.sql "$RAIZ"/database/migrations/006_historico_sessoes.sql "$RAIZ"/database/migrations/007_importacao_squid_idempotente.sql; do
+for mig in "$RAIZ"/database/migrations/002_acesso_internet.sql "$RAIZ"/database/migrations/004_operacional_v2.sql "$RAIZ"/database/migrations/005_trafego_direcional.sql "$RAIZ"/database/migrations/006_historico_sessoes.sql "$RAIZ"/database/migrations/007_importacao_squid_idempotente.sql "$RAIZ"/database/migrations/008_liberacao_temporaria.sql; do
     [ -f "$mig" ] || continue
     "${MYSQL[@]}" < "$mig" || erro "Falha ao aplicar $(basename "$mig")."
 done
