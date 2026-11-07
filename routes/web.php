@@ -6,6 +6,16 @@ $router->post('/logout', 'AuthController@sair');
 
 $router->get('/', 'DashboardController@index');
 $router->get('/dashboard/info', 'DashboardController@info');
+$router->get('/monitoramento', 'OperacionalController@monitoramento');
+$router->get('/ranking', 'OperacionalController@ranking');
+$router->get('/equipamentos', 'OperacionalController@equipamentos');
+$router->get('/equipamentos/ficha', 'OperacionalController@fichaEquipamento');
+$router->get('/controle-acesso', 'OperacionalController@controleAcesso');
+$router->get('/alertas', 'OperacionalController@alertas');
+$router->post('/alertas/{id}/reconhecer', 'OperacionalController@reconhecer');
+$router->post('/alertas/{id}/resolver', 'OperacionalController@resolverAlerta');
+$router->get('/agenda', 'OperacionalController@agenda');
+$router->get('/agenda/simulador', 'OperacionalController@simular');
 
 $router->get('/grupos', 'GrupoController@index');
 $router->post('/grupos', 'GrupoController@criar');
@@ -32,6 +42,7 @@ $router->post('/nat/{id}/toggle', 'NatController@toggle');
 $router->post('/nat/aplicar', 'NatController@aplicarTodas');
 
 $router->get('/relatorios/exportar', 'RelatorioController@exportar');
+$router->get('/relatorios/auditoria', 'RelatorioController@auditoria');
 $router->get('/relatorios', 'RelatorioController@index');
 $router->get('/tarefas', 'TarefasController@index');
 $router->get('/tarefas/lista', 'TarefasController@lista');
@@ -39,6 +50,7 @@ $router->get('/tarefas/{id}', 'TarefasController@obter');
 
 $router->get('/configuracoes', 'ConfigController@index');
 $router->post('/configuracoes', 'ConfigController@salvar');
+$router->post('/configuracoes/historico/{id}/reverter', 'ConfigController@reverter');
 
 $router->get('/senha/trocar',  'SenhaController@formularioTrocar');
 $router->post('/senha/trocar', 'SenhaController@trocar');

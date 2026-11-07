@@ -77,14 +77,17 @@ else
     mysql gwos < "$SCHEMA"
     ok "Banco 'gwos' criado a partir de $(basename "$SCHEMA")."
 
-    # Migrações opcionais
-    if [ -n "${REPO:-}" ] && [ -d "${REPO}/database/migrations" ]; then
-        for mig in "${REPO}/database/migrations/"*.sql; do
-            [ -f "$mig" ] || continue
-            mysql gwos < "$mig" 2>/dev/null && ok "Migração aplicada: $(basename "$mig")" \
-                || aviso "Migração ignorada (já aplicada?): $(basename "$mig")"
-        done
-    fi
+fi
+
+# Migrações também rodam em banco já existente para atualizar VMs instaladas.
+# Os arquivos da pasta migrations são idempotentes; qualquer erro real interrompe
+# a atualização para não deixar o painel com esquema parcialmente atualizado.
+if [ -n "${REPO:-}" ] && [ -d "${REPO}/database/migrations" ]; then
+    for mig in "${REPO}/database/migrations/"*.sql; do
+        [ -f "$mig" ] || continue
+        mysql gwos < "$mig" || erro "Falha na migração $(basename "$mig"); veja o erro SQL acima."
+        ok "Migração aplicada/confirmada: $(basename "$mig")"
+    done
 fi
 
 DB_SENHA="$DB_SENHA_NOVA"

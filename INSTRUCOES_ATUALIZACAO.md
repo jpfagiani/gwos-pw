@@ -14,7 +14,7 @@ Esta cópia contém alterações em PHP, shell, JavaScript e schema. A origem ZI
 
 ## Banco
 
-Aplicar migrations em ordem, incluindo `003_remover_credencial_padrao.sql`. Ela remove apenas a conta cujo hash é exatamente o legado conhecido. O instalador do painel cria uma conta inicial com senha aleatória de uso único ou preserva os administradores existentes. Novas instalações não recebem senha fixa no schema.
+Aplicar migrations em ordem, incluindo `003_remover_credencial_padrao.sql`, `004_operacional_v2.sql`, `005_trafego_direcional.sql`, `006_historico_sessoes.sql` e `007_importacao_squid_idempotente.sql`. A migration 005 inclui bytes direcionais, metadados de lease/interface e o limite de sessões do portal; o módulo `10-banco-mariadb` percorre migrations idempotentes quando reaplicado. A migration 003 remove apenas a conta cujo hash é exatamente o legado conhecido. O instalador do painel cria uma conta inicial com senha aleatória de uso único ou preserva os administradores existentes. Novas instalações não recebem senha fixa no schema.
 
 ## Configuração
 
@@ -29,9 +29,13 @@ Aplicar migrations em ordem, incluindo `003_remover_credencial_padrao.sql`. Ela 
 
 ## Homologação em laboratório
 
-Verificar login bom/ruim, conta desativada com sessão ativa, expiração por inatividade, limite absoluto, GET `/logout` rejeitado, POST logout sem/com CSRF, mutação sem CSRF, restrição de operador, admin e superadmin.
+Verificar login bom/ruim, conta desativada com sessão ativa, expiração por inatividade, limite absoluto, limite e concorrência de até três sessões finais, GET `/logout` rejeitado, POST logout sem/com CSRF, mutação sem CSRF, restrição de operador, admin e superadmin.
 
-Verificar portal de usuários separado do painel: cadastro, e-mail, senha, sessão, expiração, revogação, IP trocado, falha de serviço e políticas dos grupos. Conferir o comportamento do Squid e do helper em máquina dedicada.
+Verificar portal de usuários separado do painel: cadastro, e-mail, senha, sessão, expiração, revogação, IP trocado, limite de três dispositivos simultâneos, falha de serviço e políticas dos grupos. Confirmar que uma credencial final não acessa rotas administrativas. Conferir o redirect HTTP do Squid, helper, autenticação e fail-closed em máquina dedicada.
+
+Verificar que linhas novas no access.log incluem bytes de requisição e resposta; registros legados continuam importáveis e mostram upload sem dados. Conferir ranking e equipamento por período.
+
+Verificar a aba de conexões ativas contra `ss -Htn state established` enquanto clientes abrem conexões ao Squid; sockets não têm dados de destino remoto/volume por fluxo. Simular DNS indisponível, certificado próximo do vencimento, sessão acima do limite e operação falha para conferir alertas e resolução.
 
 Verificar coleta de rede normal, interfaces ausentes, contador reiniciado, falha HTTP e intervalo irregular. Conferir unidade bps, ausência de valores fabricados e que módulos não instalados não aparecem como serviços parados.
 
@@ -49,4 +53,9 @@ Revisar visual em 1440, 1024, 768 e 390 px, navegação por teclado, foco, Escap
 4. Não restaure uma credencial fixa. Se voltar a uma versão anterior do código em laboratório, gere uma senha temporária nova pela CLI e obrigue a troca no próximo acesso.
 5. Se o teste falhar no host de laboratório, restaurar snapshot antes de testar novamente.
 
-Não há rollback de firewall/rede descrito nesta entrega porque nenhuma operação de infraestrutura foi aplicada por ela. O processo operacional de rollback temporizado ainda precisa ser implementado antes de habilitar alterações críticas em produção.
+Os scripts de firewall e troca de IP têm snapshot e tentativa de rollback automático no erro. Isso ainda não foi validado em VM; mantenha console/snapshot do hypervisor disponível e exercite cenários de falha numa VM descartável antes de habilitar alterações críticas em produção.
+
+
+## Migrações do relatório mestre v2.0
+
+Para atualizar uma instalação existente a partir do pacote v2.0-dev, faça backup do banco e execute em ordem as migrations ainda não aplicadas. A migration `006_historico_sessoes.sql` cria o histórico que alimenta a seção “Histórico de sessões encerradas”; ele começa a registrar encerramentos após a atualização e não recupera sessões antigas. A migration `007_importacao_squid_idempotente.sql` adiciona uma chave por linha para impedir duplicação quando o importador reprocessa o log. O código atual também grava o grupo mais específico no momento do login; sessões ativas anteriores à migration não têm esse snapshot. O script `scripts/ativar_acesso_internet.sh` aplica as migrations 002 e 004–007. Não execute novamente migrations antigas que alterem credenciais/configurações sem conferir os avisos de cada arquivo.

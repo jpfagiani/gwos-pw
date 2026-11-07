@@ -247,20 +247,20 @@ Faz `git pull` e copia os arquivos para o servidor web sem tocar em configuraç�
 
 | Seção | Função |
 |-------|--------|
-| Dashboard | Acessos em tempo real, últimos 25 acessos, gráfico de banda, status dos serviços, carga, memória, disco e uptime |
+| Dashboard | Acessos recentes do Squid, gráfico de banda RX/TX, estado das interfaces/serviços, carga, memória, disco e uptime |
 | Grupos | Criar e gerenciar grupos de IPs (Liberados, Parciais, Bloqueados) |
 | IPs | Associar endereços IP a grupos |
 | Domínios | Blacklist e whitelist de domínios/sites |
 | Horários | Regras de liberação por dia/hora (horário livre, almoço, etc.) |
 | NAT 1:1 | Redirecionamento de portas externas para IPs internos |
 | DNS | Adicionar nomes internos (ex: `samba.cdpni.local → 10.14.29.11`) |
-| Relatórios | Histórico de acessos por IP/domínio; exportação CSV pelo período selecionado |
+| Relatórios | Tráfego por equipamento, grupo exato e interface disponível; bloqueios, sessões encerradas, alertas e dispositivos novos; CSV e impressão/PDF |
 | Histórico de tarefas | Acompanhar aplicação de firewall, DNS, Squid e NAT solicitada pelo painel |
 | Configurações | Parâmetros do sistema |
 
 As alterações privilegiadas de firewall, DNS, proxy, horários e NAT são enfileiradas. O worker cron as executa como `www-data` usando comandos allowlisted; consulte **Histórico de tarefas** para ver o estado. `Falha`, `timeout` e `não confirmado` não significam sucesso. Em caso de resultado não confirmado, confira o serviço/regras no servidor antes de repetir a ação.
 
-Relatórios CSV têm limite de 50.000 linhas por exportação. O perfil operador recebe endereços IP mascarados.
+Relatórios CSV têm limite de 50.000 linhas por exportação. Para o perfil operador, IPs, MACs, nomes de equipamentos/usuários, e-mails e detalhes de eventos ficam mascarados/restritos nos relatórios. O tráfego é medido no proxy Squid; não representa fluxos que desviam do proxy. O histórico de sessões começa após a migration 006.
 
 ---
 

@@ -54,4 +54,38 @@ Schema de novas instalações alterado e migration `003_remover_credencial_padra
 
 ## Pendências
 
-Timeout e confirmação do worker ainda precisam de teste integrado no Debian; rollback automático de firewall/rede, versionamento de configurações, testes de browser e homologação integrada do portal cativo permanecem necessários antes de produção.
+Timeout, confirmação e rollback automático precisam de teste integrado no Debian; testes de browser e homologação integrada do portal cativo permanecem necessários antes de produção.
+
+## Complemento — requisitos operacionais do Relatório Mestre v2.0
+
+- Migration `004_operacional_v2.sql` adiciona campos de protocolo/porta e interface, expiração de IP, inventário observado e alertas deduplicáveis; o instalador do banco aplica as migrations também em bancos existentes.
+- Monitoramento e ranking consultam os registros brutos importados do Squid. O log passou a registrar `%<st` (resposta) e `%>st` (requisição); a migration `005_trafego_direcional.sql` adiciona o campo, preservando `NULL` para upload legado não medido.
+- Inventário é preenchido por leases DHCP, vizinhos de rede e acessos Squid observados; MAC/hostname ficam vazios quando a fonte não os fornece.
+- Alertas de link WAN, serviços registrados, uso de disco/memória, idade/resultado do backup, pico de bloqueios, consumo por IP, MAC duplicado, bloqueio de login e novo equipamento são coletados a cada minuto; o operador pode reconhecer ou resolver eventos. Equipamentos e alertas não são dados fictícios.
+- Agenda semanal mostra as regras ativas cadastradas; o simulador aceita IP, destino, protocolo, porta e horário, avalia grupos, whitelist/blacklist, porta segura e horário pela ordem conhecida. Ele é informativo e não consulta uma ACL em memória do Squid.
+- Controle de acesso reúne políticas por grupo e sessões válidas do portal em uma página central, com links para as ações administrativas existentes.
+- Monitoramento separa sockets estabelecidos do Squid (consulta `ss`) do histórico de access.log; a ficha individual mostra política, sessão, interface/lease quando conhecidos, volumes observados e histórico.
+- O portal limita a três dispositivos simultâneos por usuário por padrão, com valor de configuração `acesso_max_sessoes_usuario` e bloqueio serializado por conta.
+- Alertas incluem teste DNS limitado a quatro segundos, certificados próximos do vencimento, limite de sessões, operações failed/timeout/unconfirmed e mudanças recentes encontradas na auditoria.
+- Regras de IP podem ter expiração. O cron desativa a regra vencida, registra auditoria e enfileira a atualização do firewall e do Squid.
+- A página de auditoria e a impressão das páginas de relatório permitem salvar em PDF pelo navegador. O PDF gerado é uma impressão HTML; não há biblioteca de PDF embutida.
+- Gráfico LAN/WAN passou a carregar histórico real RX/TX do kernel, coletado a cada minuto e mantido por sete dias.
+- Configurações agora validam interface/rede/porta/limites, mostram diff e confirmação antes de gravar, versionam valores sem persistir segredos no histórico e permitem reverter chaves não sensíveis.
+- Firewall ganhou prévia read-only com `nft -c` e diff, snapshots do ruleset/config e rollback automático quando a aplicação ou pós-checagem falha. A troca de IP também guarda snapshots, valida serviços e restaura rede, valores DB e configurações diante de falha.
+- Limitações restantes: a aba ativa observa sockets TCP estabelecidos nas portas do Squid, mas não determina destino remoto nem bytes por socket; o histórico do proxy não recebe destino IP/interface por fluxo; os bytes de upload são o tamanho HTTP da requisição, não todo o tráfego IP; tráfego que bypassa o proxy fica fora do ranking. O simulador compara configuração cadastrada, não a ACL carregada nem a resolução atual de DNS. Teste real de reachability WAN, 2FA e rollback de rede ainda requerem evolução/homologação de laboratório.
+
+## Relatórios e sessões
+
+- Migration 006 registra encerramentos de sessão por logout, expiração, revogação administrativa, desativação, troca de senha, substituição no mesmo IP e exclusão do usuário.
+- Relatórios exibem totais por período e tráfego HTTP agrupado por IP/equipamento/grupo/interface disponível, com exportação CSV de tráfego e sessões e impressão/PDF pelo navegador.
+- Interface de rede que não é associada ao log de acesso aparece como “Não coletada”; upload anterior à migration 005 segue sem estimativa.
+
+- Simulador considera expiração de política na data escolhida, seleciona o CIDR mais específico e limita regra global de permissão ao grupo parcial conforme a ACL gerada.
+- Ajustados relatórios para agregar múltiplos grupos exatos sem duplicar contagens e para restringir identificadores pessoais de sessões ao perfil operador.
+- Relatórios passam a exibir/exportar alertas e novos dispositivos por período; sessões arquivadas preservam grupo no momento do login.
+
+## Integridade da importação do Squid
+
+- Migration 007 adiciona `log_key` único por inode/geração/offset. Reprocessar o mesmo trecho depois de uma falha não duplica acessos. A geração é salva atomicamente antes da importação e a identificação usa `fstat` do arquivo aberto para cobrir rotação.
+- `parsear_logs.php` recalcula o agregado diário a partir da tabela canônica, em vez de somar novamente as últimas linhas do access.log. O script shell legado chama o mesmo recálculo e saiu do cron duplicado.
+- O relatório diário agora agrega os registros canônicos por data/IP/domínio diretamente.

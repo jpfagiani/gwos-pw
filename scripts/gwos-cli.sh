@@ -331,7 +331,7 @@ cmd_log() {
                       GROUP BY dominio
                       ORDER BY requisicoes DESC
                       LIMIT $LINHAS" 2>/dev/null \
-                || awk '{print $7}' /var/log/squid/access.log \
+                || awk '{print ($7 ~ /^[A-Z][A-Z0-9_-]*$/) ? $8 : $7}' /var/log/squid/access.log \
                    | grep -oP '(?<=://)[^/]+' \
                    | sort | uniq -c | sort -rn | head -"$LINHAS"
             ;;

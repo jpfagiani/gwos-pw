@@ -69,6 +69,16 @@ No painel, confira **Módulos**, **Histórico de tarefas** e o dashboard. O
 worker de tarefas roda pelo cron como `www-data`; se tarefas ficarem na fila,
 verifique `/etc/cron.d/gwos`, o serviço cron e os logs locais.
 
+Na revisão v2, use **Monitoramento**, **Ranking de consumo**, **Equipamentos**,
+**Controle de acesso**, **Alertas e eventos** e **Agenda e simulador** para verificar os registros
+observados. Depois de atualizar uma VM já instalada, reaplique o módulo
+`10-banco-mariadb` para executar as migrations sem apagar os dados. O painel de
+alertas e inventário depende das tarefas cron instaladas pelo módulo web.
+
+Antes de aplicar mudanças, abra **Firewall** e gere a prévia/diff. Mudanças de
+endereço IP devem ser feitas com acesso ao console da VM disponível. Exercite o
+rollback em um snapshot descartável antes de confiar nele operacionalmente.
+
 Teste primeiro com uma VM cliente conectada somente à LAN host-only. Use uma
 configuração IP estática no cliente para conferir conectividade, regras do
 firewall, DNS e Squid. Testes do portal cativo e SSL Bump exigem clientes e

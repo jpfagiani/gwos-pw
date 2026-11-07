@@ -83,6 +83,7 @@ REDE="${NOVA_REDE:-$REDE_ANTIGA}"
 PREFIX="${REDE#*/}"
 REDE_BASE="${REDE%/*}"
 [ "$PREFIX" -ge 1 ] && [ "$PREFIX" -le 30 ] || erro "Prefixo inválido: /$PREFIX"
+valida_ip "$REDE_BASE" || erro "Endereço de rede inválido: $REDE_BASE"
 
 # ------------------------------------------------------------------
 # Confere que o novo IP pertence à rede alvo
@@ -95,6 +96,11 @@ MASCARA_INT=$(( (0xFFFFFFFF << (32 - PREFIX)) & 0xFFFFFFFF ))
 if [ $(( $(ip_para_int "$NOVO_IP") & MASCARA_INT )) -ne $(( $(ip_para_int "$REDE_BASE") & MASCARA_INT )) ]; then
     erro "O IP $NOVO_IP não pertence à rede $REDE."
 fi
+REDE_NORMALIZADA=$(( $(ip_para_int "$REDE_BASE") & MASCARA_INT ))
+[ "$REDE_NORMALIZADA" -eq "$(ip_para_int "$REDE_BASE")" ] || erro "A rede $REDE_BASE não é o endereço-base alinhado ao prefixo /$PREFIX."
+HOST_MASK=$(( 0xFFFFFFFF ^ MASCARA_INT ))
+HOST_BITS=$(( $(ip_para_int "$NOVO_IP") & HOST_MASK ))
+[ "$HOST_BITS" -ne 0 ] && [ "$HOST_BITS" -ne "$HOST_MASK" ] || erro "O IP novo não pode ser o endereço de rede ou broadcast."
 
 MASK="$(( (MASCARA_INT>>24)&0xFF )).$(( (MASCARA_INT>>16)&0xFF )).$(( (MASCARA_INT>>8)&0xFF )).$(( MASCARA_INT&0xFF ))"
 
@@ -139,6 +145,58 @@ fi
 
 BACKUP="/etc/network/interfaces.bak.$(date +%Y%m%d%H%M%S)"
 cp /etc/network/interfaces "$BACKUP"
+
+# Snapshot de todos os estados que este procedimento pode alterar. O endereço
+# antigo permanece ativo até as validações de serviço e do firewall passarem.
+ROLLBACK_DIR="/var/lib/gwos/ip-changes"
+install -d -o root -g root -m 0700 "$ROLLBACK_DIR"
+STAMP="$(date +%Y%m%d_%H%M%S)_$$"
+ROLLBACK_NFT="$ROLLBACK_DIR/${STAMP}.ruleset"
+ROLLBACK_NFT_APPLY="$ROLLBACK_DIR/${STAMP}.restore"
+ROLLBACK_BIND="$ROLLBACK_DIR/${STAMP}.named.conf.options"
+ROLLBACK_SQUID="$ROLLBACK_DIR/${STAMP}.squid.conf"
+ROLLBACK_NFT_CONF="$ROLLBACK_DIR/${STAMP}.nftables.conf"
+ROLLBACK_ENV="$ROLLBACK_DIR/${STAMP}.env"
+HAD_BIND=0; HAD_SQUID=0; HAD_NFT_CONF=0; HAD_ENV=0
+[ ! -f /etc/bind/named.conf.options ] || { cp -p /etc/bind/named.conf.options "$ROLLBACK_BIND"; HAD_BIND=1; }
+[ ! -f /etc/squid/squid.conf ] || { cp -p /etc/squid/squid.conf "$ROLLBACK_SQUID"; HAD_SQUID=1; }
+[ ! -f /etc/nftables.conf ] || { cp -p /etc/nftables.conf "$ROLLBACK_NFT_CONF"; HAD_NFT_CONF=1; }
+[ ! -f "$GWOS_DIR/.env" ] || { cp -p "$GWOS_DIR/.env" "$ROLLBACK_ENV"; HAD_ENV=1; }
+nft list ruleset > "$ROLLBACK_NFT"
+{
+    echo 'flush ruleset'
+    cat "$ROLLBACK_NFT"
+} > "$ROLLBACK_NFT_APPLY"
+chmod 0600 "$ROLLBACK_DIR"/*
+nft -c -f "$ROLLBACK_NFT_APPLY" || erro "Snapshot do firewall não passou na validação; nada foi alterado."
+
+CIDR_ANTIGO=$(ip -o -4 addr show dev "$IFACE_LAN" | awk -v ip="$IP_ANTIGO" 'index($4,ip"/")==1 {print $4; exit}')
+if [ -z "$CIDR_ANTIGO" ]; then CIDR_ANTIGO="$IP_ANTIGO/$PREFIX"; fi
+ROLLBACK_ATIVO=1
+restaurar_troca_ip() {
+    rc=$?
+    if [ "$ROLLBACK_ATIVO" = "1" ]; then
+        trap - EXIT
+        aviso "Falha na troca do IP; restaurando o estado anterior. Snapshot: $ROLLBACK_DIR/$STAMP"
+        cp -p "$BACKUP" /etc/network/interfaces 2>/dev/null || true
+        [ "$HAD_BIND" = "0" ] || cp -p "$ROLLBACK_BIND" /etc/bind/named.conf.options 2>/dev/null || true
+        [ "$HAD_SQUID" = "0" ] || cp -p "$ROLLBACK_SQUID" /etc/squid/squid.conf 2>/dev/null || true
+        [ "$HAD_NFT_CONF" = "0" ] || cp -p "$ROLLBACK_NFT_CONF" /etc/nftables.conf 2>/dev/null || true
+        [ "$HAD_ENV" = "0" ] || cp -p "$ROLLBACK_ENV" "$GWOS_DIR/.env" 2>/dev/null || true
+        mysql_q "UPDATE configuracoes SET valor='${IP_ANTIGO}' WHERE chave='ip_gateway'" 2>/dev/null || true
+        mysql_q "UPDATE configuracoes SET valor='${REDE_ANTIGA}' WHERE chave='rede_lan'" 2>/dev/null || true
+        ip addr del "${NOVO_IP}/${PREFIX}" dev "$IFACE_LAN" 2>/dev/null || true
+        ip addr add "$CIDR_ANTIGO" dev "$IFACE_LAN" 2>/dev/null || true
+        nft -f "$ROLLBACK_NFT_APPLY" 2>/dev/null || echo "CRÍTICO: restaure manualmente o firewall com $ROLLBACK_NFT_APPLY" >&2
+        command -v named-checkconf >/dev/null 2>&1 && named-checkconf >/dev/null 2>&1 && systemctl reload named 2>/dev/null || true
+        command -v squid >/dev/null 2>&1 && squid -k parse >/dev/null 2>&1 && squid -k reconfigure 2>/dev/null || true
+        rm -f "$TMP"
+        aviso "Rollback concluído; confirme o endereço pelo console local antes de voltar a usar a rede."
+    fi
+    return "$rc"
+}
+trap restaurar_troca_ip EXIT
+
 cp "$TMP" /etc/network/interfaces
 ok "/etc/network/interfaces atualizado (backup: $BACKUP)"
 
@@ -154,8 +212,8 @@ ok "Novo IP ativo na interface (o antigo continua até o fim do processo)."
 # 3. Atualiza banco e .env
 # ==================================================================
 info "Atualizando banco de dados e .env..."
-mysql_q "UPDATE configuracoes SET valor='${NOVO_IP}' WHERE chave='ip_gateway'" || true
-mysql_q "UPDATE configuracoes SET valor='${REDE}'    WHERE chave='rede_lan'"   || true
+mysql_q "UPDATE configuracoes SET valor='${NOVO_IP}' WHERE chave='ip_gateway'" || erro "Falha ao atualizar IP do gateway no banco."
+mysql_q "UPDATE configuracoes SET valor='${REDE}'    WHERE chave='rede_lan'"   || erro "Falha ao atualizar a rede LAN no banco."
 if [ -f "$GWOS_DIR/.env" ]; then
     sed -i "s|^APP_URL=.*|APP_URL=http://${NOVO_IP}|" "$GWOS_DIR/.env"
 fi
@@ -168,11 +226,10 @@ if grep -q "${IP_ANTIGO};" /etc/bind/named.conf.options 2>/dev/null; then
     info "Atualizando IP antigo no named.conf.options..."
     sed -i "s|${IP_ANTIGO};|${NOVO_IP};|g" /etc/bind/named.conf.options
 fi
-if named-checkconf 2>/dev/null; then
-    systemctl reload named 2>/dev/null || true
+if command -v named-checkconf >/dev/null 2>&1; then
+    named-checkconf 2>/dev/null || erro "named-checkconf reprovou a nova configuração; iniciando rollback."
+    systemctl reload named 2>/dev/null || erro "BIND9 não recarregou; iniciando rollback."
     ok "BIND9 validado e recarregado."
-else
-    aviso "named-checkconf reportou erro — BIND9 NÃO foi recarregado. Verifique /etc/bind/."
 fi
 
 # ==================================================================
@@ -186,11 +243,10 @@ if [ -n "$NOVA_REDE" ] && [ "$NOVA_REDE" != "$REDE_ANTIGA" ] && [ -n "$REDE_ANTI
         sed -i "s|acl rede_interna dst ${REDE_ANTIGA}|acl rede_interna dst ${REDE}|" /etc/squid/squid.conf
     fi
 fi
-if squid -k parse &>/dev/null; then
-    squid -k reconfigure 2>/dev/null || true
+if command -v squid >/dev/null 2>&1; then
+    squid -k parse &>/dev/null || erro "squid -k parse reprovou a nova configuração; iniciando rollback."
+    squid -k reconfigure 2>/dev/null || erro "Squid não recarregou; iniciando rollback."
     ok "Squid validado e recarregado."
-else
-    aviso "squid -k parse reportou erro — Squid NÃO foi recarregado."
 fi
 
 # ==================================================================
@@ -199,7 +255,7 @@ fi
 info "Regenerando regras nftables..."
 bash "$GWOS_DIR/scripts/aplicar_nftables.sh" \
     && ok "nftables reaplicado." \
-    || aviso "Falha ao regenerar nftables — regras anteriores mantidas."
+    || erro "Falha ao regenerar nftables; a troca de IP será revertida."
 
 # ==================================================================
 # 7. Remove o IP antigo da interface (último passo)
@@ -211,6 +267,11 @@ if [ "$IP_ANTIGO" != "$NOVO_IP" ]; then
         ip addr del "$CIDR_ANTIGO" dev "$IFACE_LAN" || true
     fi
 fi
+
+ip -4 addr show dev "$IFACE_LAN" | grep -Fq "${NOVO_IP}/${PREFIX}" || erro "Pós-checagem falhou: IP novo não está ativo."
+ROLLBACK_ATIVO=0
+trap - EXIT
+rm -f "$TMP"
 
 # ==================================================================
 # Resumo

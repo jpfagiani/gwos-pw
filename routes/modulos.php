@@ -33,6 +33,7 @@ $router->get ('/modulos/hora/clientes',  'HoraController@clientes');
 // --- 40-firewall-nftables -------------------------------------------------
 $router->get ('/modulos/firewall',          'FirewallController@index');
 $router->post('/modulos/firewall/regerar',  'FirewallController@regerar');
+$router->post('/modulos/firewall/preview',  'FirewallController@preview');
 
 // --- 50-proxy-squid -------------------------------------------------------
 $router->get ('/modulos/proxy',             'ProxyController@index');

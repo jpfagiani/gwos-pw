@@ -400,8 +400,11 @@ cat > /etc/cron.d/gwos <<CRON
 # GWOS — tarefas automáticas (módulo 60-painel-web)
 0 2 * * * root /bin/bash ${REPO}/scripts/backup.sh >> /var/log/gwos_backup.log 2>&1
 */5 * * * * root /usr/bin/php ${REPO}/scripts/parsear_logs.php >> /var/log/gwos_parser.log 2>&1
-0 * * * * root /bin/bash ${REPO}/scripts/importar_log_squid.sh >> /var/log/gwos_import_log.log 2>&1
 * * * * * root /usr/bin/php ${REPO}/scripts/importar_acessos_squid.php >> /var/log/gwos_acessos.log 2>&1
+* * * * * root /usr/bin/php ${REPO}/scripts/coletar_alertas.php >> /var/log/gwos_alertas.log 2>&1
+* * * * * root /usr/bin/php ${REPO}/scripts/coletar_metricas_rede.php >> /var/log/gwos_metricas.log 2>&1
+* * * * * www-data /usr/bin/php ${REPO}/scripts/expirar_politicas.php >> /var/log/gwos_politicas.log 2>&1
+* * * * * root /usr/bin/php ${REPO}/scripts/descobrir_equipamentos.php >> /var/log/gwos_equipamentos.log 2>&1
 * * * * * www-data /usr/bin/php ${REPO}/scripts/processar_tarefas.php >/dev/null 2>&1
 CRON
 chmod 644 /etc/cron.d/gwos

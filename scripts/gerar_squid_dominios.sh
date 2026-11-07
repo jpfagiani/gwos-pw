@@ -52,7 +52,29 @@ dedup_dominios() {
 # VAZIA — e o SSL Bump voltava a interceptar justamente os sites de governo
 # que ela existe para proteger. O erro so apareceria no navegador do usuario.
 TMP_W="$(mktemp)"; TMP_B="$(mktemp)"
-trap 'rm -f "$TMP_W" "$TMP_B"' EXIT
+BACKUP_DIR="$(mktemp -d /tmp/gwos_squid_domains.XXXXXX)"
+chmod 0700 "$BACKUP_DIR"
+COMMITADO=0
+for _f in gwos_whitelist.txt gwos_blacklist.txt; do
+    if [ -f "$SQUID_DIR/$_f" ]; then cp -p "$SQUID_DIR/$_f" "$BACKUP_DIR/$_f"; else : > "$BACKUP_DIR/.absent_$_f"; fi
+done
+restaurar_listas() {
+    for _f in gwos_whitelist.txt gwos_blacklist.txt; do
+        if [ -f "$BACKUP_DIR/.absent_$_f" ]; then rm -f "$SQUID_DIR/$_f"
+        elif [ -f "$BACKUP_DIR/$_f" ]; then cp -p "$BACKUP_DIR/$_f" "$SQUID_DIR/$_f"; fi
+    done
+}
+limpar() {
+    rc=$?
+    if [ "$COMMITADO" = "0" ]; then
+        restaurar_listas
+        if [ "$NO_RECONFIGURE" = "0" ] && command -v squid >/dev/null 2>&1; then squid -k parse >/dev/null 2>&1 && squid -k reconfigure >/dev/null 2>&1 || true; fi
+    fi
+    rm -f "$TMP_W" "$TMP_B"
+    rm -rf "$BACKUP_DIR"
+    return "$rc"
+}
+trap limpar EXIT
 
 if ! mysql_q "SELECT CONCAT('.', dominio) FROM dominios
               WHERE tipo='whitelist' AND ativo=1
@@ -78,5 +100,10 @@ install -m 644 "$TMP_B" "$SQUID_DIR/gwos_blacklist.txt"
 if [ "$NO_RECONFIGURE" -eq 0 ]; then
     squid -k parse && squid -k reconfigure
 fi
+
+COMMITADO=1
+trap - EXIT
+rm -f "$TMP_W" "$TMP_B"
+rm -rf "$BACKUP_DIR"
 
 echo "Listas de domínios Squid atualizadas com sucesso."

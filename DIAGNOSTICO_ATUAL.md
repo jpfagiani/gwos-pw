@@ -35,4 +35,4 @@ Estado: implementação local em cópia de entrega, sem instalação no host.
 
 ## Limites desta entrega
 
-O ZIP continha uma versão que já implementava parte importante do portal e do sistema modular. A atualização preserva essa base. Mudanças de banco não foram necessárias para os ajustes realizados. As operações privilegiadas, firewall e DNS não foram aplicados neste computador. A validação integrada ainda depende de Debian 13 de laboratório.
+O ZIP continha uma versão que já implementava parte importante do portal e do sistema modular. A atualização preserva essa base. As alterações incluem migrations 004–006 e schema atualizado. O instalador do módulo MariaDB reaplica as migrations idempotentes em bancos existentes; a migration 006 começa a registrar histórico de sessões após a atualização. As operações privilegiadas, firewall e DNS não foram aplicados neste computador. A validação integrada ainda depende de Debian 13 de laboratório.

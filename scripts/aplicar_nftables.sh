@@ -25,6 +25,26 @@ DB_SENHA="${DB_SENHA:-}"
 
 SQUID_DIR="/etc/squid/conf.d"
 mkdir -p "$SQUID_DIR"
+SQUID_OWNED_FILES=(gwos_ips_isentos.txt gwos_ips_bloqueados.txt gwos_ips_parciais.txt gwos_ips_liberados.txt gwos_tcp_outgoing.conf)
+SQUID_BACKUP_DIR="$(mktemp -d /tmp/gwos_squid_rules.XXXXXX)"
+chmod 0700 "$SQUID_BACKUP_DIR"
+SQUID_CHANGES_COMMITTED=0
+for _f in "${SQUID_OWNED_FILES[@]}"; do
+    if [ -f "$SQUID_DIR/$_f" ]; then cp -p "$SQUID_DIR/$_f" "$SQUID_BACKUP_DIR/$_f"; else : > "$SQUID_BACKUP_DIR/.absent_$_f"; fi
+done
+restore_squid_files() {
+    for _f in "${SQUID_OWNED_FILES[@]}"; do
+        if [ -f "$SQUID_BACKUP_DIR/.absent_$_f" ]; then rm -f "$SQUID_DIR/$_f"
+        elif [ -f "$SQUID_BACKUP_DIR/$_f" ]; then cp -p "$SQUID_BACKUP_DIR/$_f" "$SQUID_DIR/$_f"; fi
+    done
+}
+cleanup_squid_files() {
+    rc=$?
+    if [ "$SQUID_CHANGES_COMMITTED" = "0" ]; then restore_squid_files; fi
+    rm -rf "$SQUID_BACKUP_DIR"
+    return "$rc"
+}
+trap cleanup_squid_files EXIT
 
 mysql_q() {
     mysql -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" "$DB_BANCO" \
@@ -62,21 +82,21 @@ SQUID_PORTA_SSL="${SQUID_PORTA_SSL:-3129}"
 # ------------------------------------------------------------------
 IPS_BLOQUEADOS=$(mysql_q \
     "SELECT i.endereco FROM ips i JOIN ip_grupos g ON g.id = i.grupo_id
-     WHERE g.tipo='bloqueado' AND i.ativo=1 AND g.ativo=1")
+     WHERE g.tipo='bloqueado' AND i.ativo=1 AND g.ativo=1 AND (i.expira_em IS NULL OR i.expira_em>NOW())")
 
 IPS_PARCIAIS=$(mysql_q \
     "SELECT i.endereco FROM ips i JOIN ip_grupos g ON g.id = i.grupo_id
-     WHERE g.tipo='parcial' AND i.ativo=1 AND g.ativo=1")
+     WHERE g.tipo='parcial' AND i.ativo=1 AND g.ativo=1 AND (i.expira_em IS NULL OR i.expira_em>NOW())")
 
 IPS_LIBERADOS=$(mysql_q \
     "SELECT i.endereco FROM ips i JOIN ip_grupos g ON g.id = i.grupo_id
-     WHERE g.tipo='liberado' AND i.ativo=1 AND g.ativo=1")
+     WHERE g.tipo='liberado' AND i.ativo=1 AND g.ativo=1 AND (i.expira_em IS NULL OR i.expira_em>NOW())")
 
 # Isentos de login: navegam sem senha mas PASSAM pelo proxy (não entram em
 # ip_bypass_proxy), então ficam registrados no log de acessos.
 IPS_ISENTOS=$(mysql_q \
     "SELECT i.endereco FROM ips i JOIN ip_grupos g ON g.id = i.grupo_id
-     WHERE g.tipo='isento' AND i.ativo=1 AND g.ativo=1")
+     WHERE g.tipo='isento' AND i.ativo=1 AND g.ativo=1 AND (i.expira_em IS NULL OR i.expira_em>NOW())")
 
 # Escreve arquivos para o Squid
 echo "$IPS_ISENTOS"    > "$SQUID_DIR/gwos_ips_isentos.txt"
@@ -110,6 +130,10 @@ while IFS=$'\t' read -r ip_externo ip_interno; do
     TCP_OUTGOING+="tcp_outgoing_address ${ip_interno} ${ACL_NOME}"$'\n'
 done < <(mysql_q "SELECT ip_externo, ip_interno FROM nat_um_para_um WHERE ativo=1" 2>/dev/null || true)
 echo "$TCP_OUTGOING" > "$SQUID_DIR/gwos_tcp_outgoing.conf"
+
+if tem_squid; then
+    squid -k parse >/dev/null 2>&1 || erro "As listas geradas reprovaram squid -k parse; regras existentes preservadas."
+fi
 
 if [ "$NAT_ATIVO" = "1" ]; then
     MASQ="        oif \"$IFACE_WAN\" masquerade"
@@ -293,8 +317,77 @@ nft -c -f /tmp/gwos_nftables_test.conf || {
     exit 1
 }
 
+if [ "${1:-}" = "--preview" ]; then
+    if tem_squid; then squid -k parse >/dev/null 2>&1 || erro "A prévia dos arquivos Squid falhou."; fi
+    echo "PREVIEW_VALIDADO: ruleset aprovado por nft -c; nenhuma regra foi aplicada."
+    set +e
+    if [ -f /etc/nftables.conf ]; then
+        diff -u --label atual /etc/nftables.conf --label proposto /tmp/gwos_nftables_test.conf
+    else
+        diff -u --label atual /dev/null --label proposto /tmp/gwos_nftables_test.conf
+    fi
+    rc=$?
+    set -e
+    rm -f /tmp/gwos_nftables_test.conf
+    [ "$rc" -le 1 ] || erro "Falha ao produzir diff do firewall."
+    restore_squid_files
+    SQUID_CHANGES_COMMITTED=1
+    rm -rf "$SQUID_BACKUP_DIR"
+    trap - EXIT
+    exit 0
+fi
+
+ROLLBACK_DIR="/var/lib/gwos/firewall-rollback"
+install -d -o root -g root -m 0700 "$ROLLBACK_DIR"
+STAMP="$(date +%Y%m%d_%H%M%S)_$$"
+SNAPSHOT="$ROLLBACK_DIR/${STAMP}.ruleset"
+RESTORE_FILE="$ROLLBACK_DIR/${STAMP}.restore"
+PREVIOUS_CONFIG="$ROLLBACK_DIR/${STAMP}.nftables.conf"
+HAD_CONFIG=0
+nft list ruleset > "$SNAPSHOT"
+chmod 0600 "$SNAPSHOT"
+{
+    echo 'flush ruleset'
+    cat "$SNAPSHOT"
+} > "$RESTORE_FILE"
+chmod 0600 "$RESTORE_FILE"
+if [ -f /etc/nftables.conf ]; then
+    cp -p /etc/nftables.conf "$PREVIOUS_CONFIG"
+    HAD_CONFIG=1
+fi
+nft -c -f "$RESTORE_FILE" || erro "O snapshot atual do firewall não pode ser validado; regras novas não foram aplicadas."
+
+APLICACAO_INICIADA=0
+rollback_firewall() {
+    rc=$?
+    if [ "$APLICACAO_INICIADA" = "1" ]; then
+        echo "ERRO: aplicação do firewall falhou; restaurando snapshot $STAMP." >&2
+        if ! nft -f "$RESTORE_FILE"; then
+            echo "CRÍTICO: rollback automático falhou. Snapshot em $RESTORE_FILE" >&2
+        fi
+        if [ "$HAD_CONFIG" = "1" ]; then
+            cp -p "$PREVIOUS_CONFIG" /etc/nftables.conf
+        else
+            rm -f /etc/nftables.conf
+        fi
+        echo "Rollback do ruleset anterior concluído." >&2
+    fi
+    if [ "$SQUID_CHANGES_COMMITTED" = "0" ]; then
+        restore_squid_files
+        if tem_squid; then squid -k parse >/dev/null 2>&1 && squid -k reconfigure >/dev/null 2>&1 || true; fi
+    fi
+    rm -f /tmp/gwos_nftables_test.conf
+    rm -rf "$SQUID_BACKUP_DIR"
+    return "$rc"
+}
+trap rollback_firewall EXIT
+
+APLICACAO_INICIADA=1
 cp /tmp/gwos_nftables_test.conf /etc/nftables.conf
 nft -f /etc/nftables.conf
+REGRAS_APOS=$(nft list ruleset)
+grep -q 'table inet gwos' <<< "$REGRAS_APOS" || erro "Pós-checagem falhou: tabela de firewall GWOS ausente."
+grep -q 'table ip gwos_nat' <<< "$REGRAS_APOS" || erro "Pós-checagem falhou: tabela NAT GWOS ausente."
 
 mysql -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" "$DB_BANCO" \
     -e "INSERT INTO regras_historico (modulo, descricao) VALUES ('nftables', 'Regras aplicadas via painel')" \
@@ -302,7 +395,15 @@ mysql -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" "$DB_BANCO" \
 
 rm -f /tmp/gwos_nftables_test.conf
 
-# Recarrega Squid para aplicar novos arquivos de ACL
-squid -k reconfigure 2>/dev/null || true
+# Recarrega Squid somente após parse. Falhas ainda acionam o rollback.
+if tem_squid; then
+    squid -k parse >/dev/null 2>&1 || erro "Pós-checagem Squid falhou; iniciando rollback."
+    squid -k reconfigure 2>/dev/null || erro "Squid não reconfigurou; iniciando rollback."
+fi
+
+SQUID_CHANGES_COMMITTED=1
+APLICACAO_INICIADA=0
+trap - EXIT
+rm -rf "$SQUID_BACKUP_DIR"
 
 echo "nftables e arquivos Squid aplicados com sucesso."

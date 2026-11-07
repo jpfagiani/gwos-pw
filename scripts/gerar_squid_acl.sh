@@ -4,6 +4,8 @@
 
 set -euo pipefail
 
+erro() { echo "ERRO: $*" >&2; exit 1; }
+
 GWOS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -f "$GWOS_DIR/.env" ]; then set -a; source "$GWOS_DIR/.env"; set +a; fi
 
@@ -11,7 +13,30 @@ DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_BANCO="${DB_BANCO:-gwos}"
 DB_USUARIO="${DB_USUARIO:-gwos}"
 DB_SENHA="${DB_SENHA:-}"
-SQUID_ACL="/etc/squid/conf.d/gwos_horarios.conf"
+SQUID_DIR="/etc/squid/conf.d"
+SQUID_ALVO="$SQUID_DIR/gwos_horarios.conf"
+mkdir -p "$SQUID_DIR"
+BACKUP_DIR="$(mktemp -d /tmp/gwos_squid_horarios.XXXXXX)"
+chmod 0700 "$BACKUP_DIR"
+COMMITADO=0
+HAD_ACL=0
+if [ -f "$SQUID_ALVO" ]; then cp -p "$SQUID_ALVO" "$BACKUP_DIR/anterior.conf"; HAD_ACL=1; fi
+SQUID_ACL="$(mktemp "$SQUID_DIR/.gwos_horarios.XXXXXX")"
+restaurar_acl() {
+    if [ "$HAD_ACL" = "1" ]; then cp -p "$BACKUP_DIR/anterior.conf" "$SQUID_ALVO"
+    else rm -f "$SQUID_ALVO"; fi
+}
+limpar_acl() {
+    rc=$?
+    if [ "$COMMITADO" = "0" ]; then
+        restaurar_acl
+        if command -v squid >/dev/null 2>&1; then squid -k parse >/dev/null 2>&1 && squid -k reconfigure >/dev/null 2>&1 || true; fi
+    fi
+    rm -f "$SQUID_ACL"
+    rm -rf "$BACKUP_DIR"
+    return "$rc"
+}
+trap limpar_acl EXIT
 
 cat > "$SQUID_ACL" <<'HEADER'
 # Gerado automaticamente pelo GWOS — não editar manualmente.
@@ -26,7 +51,7 @@ DIA_MAP=("S" "M" "T" "W" "H" "F" "A")
 # Busca regras ativas
 mysql -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" "$DB_BANCO" \
     --batch --skip-column-names \
-    -e "SELECT id, dias_semana, hora_inicio, hora_fim, acao, grupo_id FROM horarios WHERE ativo = 1" | \
+    -e "SELECT id, dias_semana, hora_inicio, hora_fim, acao, grupo_id FROM horarios WHERE ativo = 1 ORDER BY id" | \
 while IFS=$'\t' read -r id dias hora_ini hora_fim acao grupo_id; do
 
     # Converte bits para letras do Squid (SMTWHFA)
@@ -49,7 +74,7 @@ while IFS=$'\t' read -r id dias hora_ini hora_fim acao grupo_id; do
         # Busca IPs do grupo
         ips=$(mysql -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" "$DB_BANCO" \
             --batch --skip-column-names \
-            -e "SELECT endereco FROM ips WHERE grupo_id = $grupo_id AND ativo = 1")
+            -e "SELECT endereco FROM ips WHERE grupo_id = $grupo_id AND ativo = 1 AND (expira_em IS NULL OR expira_em>NOW())")
 
         if [ -n "$ips" ]; then
             echo "acl grupo_ips_${id} src $(echo "$ips" | tr '\n' ' ')" >> "$SQUID_ACL"
@@ -81,8 +106,15 @@ while IFS=$'\t' read -r id dias hora_ini hora_fim acao grupo_id; do
     fi
 done
 
-if [[ "${1:-}" != "--no-reconfigure" ]]; then
-    squid -k parse && squid -k reconfigure
+install -m 0644 "$SQUID_ACL" "$SQUID_ALVO"
+if command -v squid >/dev/null 2>&1; then
+    squid -k parse || erro "ACL de horário reprovada no squid -k parse; configuração anterior restaurada."
+    if [[ "${1:-}" != "--no-reconfigure" ]]; then squid -k reconfigure || erro "Squid não recarregou as regras de horário."; fi
 fi
+
+COMMITADO=1
+trap - EXIT
+rm -f "$SQUID_ACL"
+rm -rf "$BACKUP_DIR"
 
 echo "ACLs de horário aplicadas com sucesso."
