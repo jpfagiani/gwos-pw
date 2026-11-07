@@ -689,3 +689,39 @@ iniciar_modulo() {
     instalar_ferramentas_comuns
     garantir_conf
 }
+
+# ---------------------------------------------------------------------------
+# Senha do administrador do painel: digitada por quem instala (não aleatória).
+# Resultado em ADMIN_SENHA. Fontes, em ordem: variável GWOS_ADMIN_SENHA
+# (instalação automatizada) ou pergunta oculta no terminal, com confirmação.
+# ---------------------------------------------------------------------------
+pedir_senha_admin() {
+    ADMIN_SENHA=""
+    if [ -n "${GWOS_ADMIN_SENHA:-}" ]; then
+        if [ "${#GWOS_ADMIN_SENHA}" -lt 8 ]; then
+            erro "GWOS_ADMIN_SENHA precisa ter ao menos 8 caracteres."
+        fi
+        ADMIN_SENHA="$GWOS_ADMIN_SENHA"
+        return 0
+    fi
+    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+        erro "Sem terminal para pedir a senha do administrador. Exporte GWOS_ADMIN_SENHA (mín. 8 caracteres) e rode de novo."
+    fi
+    local s1 s2 tentativas=0
+    echo "" > /dev/tty
+    echo -e "${BOLD}Defina a senha do administrador do painel (admin@gwos.local).${NC}" > /dev/tty
+    while [ "$tentativas" -lt 5 ]; do
+        printf 'Senha (mín. 8 caracteres): ' > /dev/tty;  IFS= read -rs s1 < /dev/tty; echo "" > /dev/tty
+        printf 'Repita a senha          : ' > /dev/tty;  IFS= read -rs s2 < /dev/tty; echo "" > /dev/tty
+        if [ "${#s1}" -lt 8 ]; then
+            echo -e "${RED}[!]${NC} A senha precisa ter ao menos 8 caracteres." > /dev/tty
+        elif [ "$s1" != "$s2" ]; then
+            echo -e "${RED}[!]${NC} As senhas não conferem." > /dev/tty
+        else
+            ADMIN_SENHA="$s1"
+            return 0
+        fi
+        tentativas=$((tentativas + 1))
+    done
+    erro "Senha do administrador não definida após 5 tentativas."
+}

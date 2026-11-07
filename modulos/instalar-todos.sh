@@ -200,14 +200,13 @@ if [[ " ${INSTALADOS[*]} " == *" 60-painel-web "* ]]; then
         echo -e "  Painel      : ${BOLD}http://${IP_GATEWAY:-?}:${PAINEL_PORTA}${NC}"
     fi
     echo -e "  Login       : ${BOLD}admin@gwos.local${NC}"
-    echo "  A senha inicial foi exibida uma única vez pelo módulo 60-painel-web."
+    echo "  Senha: a que você digitou durante a instalação do módulo 60-painel-web."
 fi
 if tem_ssl_bump; then
     echo -e "  Certificado : ${BOLD}http://${IP_GATEWAY}/gwos-ca.crt${NC} — instale nos clientes"
 fi
 echo ""
 echo -e "  Conferir tudo: ${BOLD}bash ${MOD_DIR}/verificar-todos.sh${NC}"
-echo -e "  ${YELLOW}Guarde a senha inicial exibida pelo módulo do painel.${NC}"
 echo ""
 
 [ ${#FALHOU[@]} -eq 0 ]

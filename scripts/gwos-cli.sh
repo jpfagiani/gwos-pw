@@ -495,7 +495,7 @@ cmd_help() {
     echo "  dns del <host>               Remover host"
     echo ""
     echo -e "${B}Usuários/Senha:${N}"
-    echo "  senha <email> [nova_senha]   Redefinir senha (sem senha, gera credencial aleatória)"
+    echo "  senha <email> [nova_senha]   Redefinir senha (sem a senha na linha, pergunta no terminal)"
     echo "  senha listar                 Listar todos os admins"
     echo "  resetsenha <email>           Gerar token de reset e forçar troca"
     echo "  desbloqueio <email>          Desbloquear conta após tentativas excessivas"
@@ -644,9 +644,25 @@ cmd_senha() {
         exit 1
     fi
 
-    # Sem senha definida pelo operador, gera uma credencial aleatória.
+    # Sem senha na linha de comando (que ficaria no histórico do shell),
+    # pergunta no terminal, sem eco e com confirmação.
+    local digitada=0
     if [ -z "$nova" ]; then
-        nova="$(openssl rand -hex 16)"
+        local conf tentativas=0
+        [ -t 0 ] || { erro "Sem terminal para pedir a senha. Uso: gwos senha <email> <nova_senha>"; exit 1; }
+        while :; do
+            read -rsp "Nova senha para ${email} (mín. 8 caracteres): " nova; echo ""
+            read -rsp "Repita a senha: " conf; echo ""
+            if [ "${#nova}" -lt 8 ]; then erro "A senha precisa ter ao menos 8 caracteres."
+            elif [ "$nova" != "$conf" ]; then erro "As senhas não conferem."
+            else break; fi
+            tentativas=$((tentativas + 1))
+            [ "$tentativas" -lt 3 ] || { erro "Senha não definida."; exit 1; }
+        done
+        digitada=1
+    fi
+    if [ "${#nova}" -lt 8 ]; then
+        erro "A senha precisa ter ao menos 8 caracteres."; exit 1
     fi
 
     # Variáveis passadas via ambiente — evita qualquer expansão de $ ou ' no código PHP
@@ -658,6 +674,7 @@ cmd_senha() {
         _GW_PASS="${DB_SENHA}" \
         _GW_EMAIL="${email}" \
         _GW_NOVA="${nova}" \
+        _GW_FORCAR="$((1 - digitada))" \
         php << 'PHP'
 <?php
 try {
@@ -668,9 +685,9 @@ try {
     );
     $hash = password_hash($_SERVER['_GW_NOVA'], PASSWORD_BCRYPT, ['cost' => 12]);
     $st   = $pdo->prepare(
-        'UPDATE admins SET senha=?, tentativas=0, bloqueado_ate=NULL, primeiro_login=1 WHERE email=?'
+        'UPDATE admins SET senha=?, tentativas=0, bloqueado_ate=NULL, primeiro_login=? WHERE email=?'
     );
-    $st->execute([$hash, $_SERVER['_GW_EMAIL']]);
+    $st->execute([$hash, (int) $_SERVER['_GW_FORCAR'], $_SERVER['_GW_EMAIL']]);
     echo 'ok';
 } catch (Exception $e) {
     echo 'erro:' . $e->getMessage();
@@ -686,8 +703,6 @@ PHP
     echo ""
     ok "Senha redefinida com sucesso!"
     echo "  Admin : ${email}"
-    echo "  Senha temporária: ${nova}"
-    echo "  (será solicitada troca no próximo acesso)"
     echo ""
 }
 

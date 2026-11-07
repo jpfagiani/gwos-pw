@@ -73,8 +73,10 @@ instalar_pacotes nginx \
     "php${PHP_VER}-curl" "php${PHP_VER}-zip" "php${PHP_VER}-xml" "php${PHP_VER}-intl" \
     tar gzip unzip openssl
 
-# Segredo efêmero usado apenas para provisionar/rotacionar a credencial inicial.
-SENHA_INICIAL="$(openssl rand -hex 16)"
+# A senha do administrador é digitada por quem instala (pedir_senha_admin, em
+# comum/lib.sh) — só quando a conta ainda precisa ser criada ou tem a senha de
+# fábrica. Nada é gerado nem impresso. Instalação automatizada: GWOS_ADMIN_SENHA.
+SENHA_INICIAL=""
 ADMIN_INICIAL_RESULTADO=""
 
 # ---------------------------------------------------------------------------
@@ -229,6 +231,9 @@ if [ "$MODO_LEVE" = "1" ]; then
     fi
     if [ -f "$ARQ_USUARIOS" ]; then
         aviso "Usuários do painel preservados (${ARQ_USUARIOS})."
+        # Passo 1: só verifica se a conta ainda usa a senha de fábrica.
+        # Passo 2 (se preciso): pede a senha e grava.
+        for PASSO in 1 2; do
         ESTADO_ADMIN=$(GWOS_USERS_FILE="$ARQ_USUARIOS" GWOS_INIT_PASS="$SENHA_INICIAL" GWOS_LEGACY_PASS='gwos@2025' php <<'PHP'
 <?php
 $arquivo = getenv('GWOS_USERS_FILE');
@@ -237,8 +242,9 @@ if (!is_array($usuarios)) exit(1);
 $mudou = false;
 foreach ($usuarios as &$usuario) {
     if (($usuario['email'] ?? '') === 'admin@gwos.local' && password_verify(getenv('GWOS_LEGACY_PASS'), (string) ($usuario['senha'] ?? ''))) {
+        if (getenv('GWOS_INIT_PASS') === '') { echo 'PRECISA_SENHA'; exit(0); }
         $usuario['senha'] = password_hash(getenv('GWOS_INIT_PASS'), PASSWORD_BCRYPT, ['cost' => 12]);
-        $usuario['primeiro_login'] = 1;
+        $usuario['primeiro_login'] = 0;
         $mudou = true;
     }
 }
@@ -252,8 +258,14 @@ if ($mudou) {
 }
 PHP
 )
-        if [ "$ESTADO_ADMIN" = "ROTACIONADO" ]; then ADMIN_INICIAL_RESULTADO="$SENHA_INICIAL"; fi
+        if [ "$ESTADO_ADMIN" = "PRECISA_SENHA" ] && [ "$PASSO" = "1" ]; then
+            pedir_senha_admin; SENHA_INICIAL="$ADMIN_SENHA"; continue
+        fi
+        if [ "$ESTADO_ADMIN" = "ROTACIONADO" ]; then ADMIN_INICIAL_RESULTADO="definida"; fi
+        break
+        done
     else
+        pedir_senha_admin; SENHA_INICIAL="$ADMIN_SENHA"
         HASH=$(GWOS_INIT_PASS="$SENHA_INICIAL" php -r 'echo password_hash(getenv("GWOS_INIT_PASS"), PASSWORD_BCRYPT, ["cost" => 12]);')
         cat > "$ARQ_USUARIOS" <<USUARIOS
 [
@@ -264,7 +276,7 @@ PHP
         "senha": "${HASH}",
         "perfil": "superadmin",
         "ativo": 1,
-        "primeiro_login": 1,
+        "primeiro_login": 0,
         "tentativas": 0,
         "bloqueado_ate": null,
         "ultimo_login": null,
@@ -274,7 +286,7 @@ PHP
 ]
 USUARIOS
         ok "Usuário do painel criado em ${ARQ_USUARIOS}."
-        ADMIN_INICIAL_RESULTADO="$SENHA_INICIAL"
+        ADMIN_INICIAL_RESULTADO="definida"
     fi
     # O painel precisa escrever aqui (tentativas, bloqueio, troca de senha)
     chown root:www-data "$ARQ_USUARIOS"
@@ -437,6 +449,9 @@ ok "Diretórios e permissões ajustados."
 # Primeiro administrador: credencial aleatória, impressa apenas uma vez.
 # ---------------------------------------------------------------------------
 if [ "$MODO_LEVE" = "0" ]; then
+    # Passo 1: descobre se a conta precisa de senha nova (inexistente ou de
+    # fábrica). Passo 2: pede a senha a quem instala e grava.
+    for PASSO in 1 2; do
     ESTADO_ADMIN=$(GWOS_DB_HOST="$DB_HOST" GWOS_DB_NAME="$DB_BANCO" GWOS_DB_USER="$DB_USUARIO" GWOS_DB_PASS="$DB_SENHA" GWOS_INIT_PASS="$SENHA_INICIAL" GWOS_LEGACY_PASS='gwos@2025' php <<'PHP'
 <?php
 try {
@@ -445,13 +460,16 @@ try {
     $stmt = $pdo->prepare('SELECT id, senha FROM admins WHERE email=? LIMIT 1');
     $stmt->execute([$email]);
     $admin = $stmt->fetch(PDO::FETCH_ASSOC);
+    $senha = getenv('GWOS_INIT_PASS');
     if (!$admin) {
-        $stmt = $pdo->prepare('INSERT INTO admins (nome,email,senha,perfil,primeiro_login) VALUES (?,?,?,?,1)');
-        $stmt->execute(['Administrador', $email, password_hash(getenv('GWOS_INIT_PASS'), PASSWORD_BCRYPT, ['cost' => 12]), 'superadmin']);
+        if ($senha === '') { echo 'PRECISA_SENHA'; exit(0); }
+        $stmt = $pdo->prepare('INSERT INTO admins (nome,email,senha,perfil,primeiro_login) VALUES (?,?,?,?,0)');
+        $stmt->execute(['Administrador', $email, password_hash($senha, PASSWORD_BCRYPT, ['cost' => 12]), 'superadmin']);
         echo 'CRIADO';
     } elseif (password_verify(getenv('GWOS_LEGACY_PASS'), (string) $admin['senha'])) {
-        $stmt = $pdo->prepare('UPDATE admins SET senha=?, primeiro_login=1 WHERE id=?');
-        $stmt->execute([password_hash(getenv('GWOS_INIT_PASS'), PASSWORD_BCRYPT, ['cost' => 12]), $admin['id']]);
+        if ($senha === '') { echo 'PRECISA_SENHA'; exit(0); }
+        $stmt = $pdo->prepare('UPDATE admins SET senha=?, primeiro_login=0, tentativas=0, bloqueado_ate=NULL WHERE id=?');
+        $stmt->execute([password_hash($senha, PASSWORD_BCRYPT, ['cost' => 12]), $admin['id']]);
         echo 'ROTACIONADO';
     } else {
         echo 'EXISTENTE';
@@ -459,12 +477,18 @@ try {
 } catch (Throwable $e) { fwrite(STDERR, "Falha ao provisionar o administrador inicial.\n"); exit(1); }
 PHP
 )
+    if [ "$ESTADO_ADMIN" = "PRECISA_SENHA" ] && [ "$PASSO" = "1" ]; then
+        pedir_senha_admin; SENHA_INICIAL="$ADMIN_SENHA"; continue
+    fi
+    break
+    done
     case "$ESTADO_ADMIN" in
-        CRIADO|ROTACIONADO) ADMIN_INICIAL_RESULTADO="$SENHA_INICIAL" ;;
+        CRIADO|ROTACIONADO) ADMIN_INICIAL_RESULTADO="definida" ;;
         EXISTENTE) ;;
         *) aviso "Não foi possível confirmar a conta inicial; consulte o diagnóstico sem exibir credenciais." ;;
     esac
 fi
+SENHA_INICIAL=""; ADMIN_SENHA=""
 
 # Publica a CA do Squid, se existir
 if tem_ssl_bump; then
@@ -481,9 +505,9 @@ ok "Módulo 60-painel-web instalado."
 echo -e "  URL          : ${BOLD}${APP_URL_PAINEL}${NC}"
 echo -e "  Login        : ${BOLD}admin@gwos.local${NC}"
 if [ -n "$ADMIN_INICIAL_RESULTADO" ]; then
-    echo -e "  Senha inicial: ${BOLD}${ADMIN_INICIAL_RESULTADO}${NC}  ${YELLOW}(anote agora; troca obrigatória no primeiro acesso)${NC}"
+    echo -e "  Senha        : ${BOLD}a que você acabou de digitar${NC}"
 else
-    echo "  Senha inicial: conta preservada; use a credencial administrativa já cadastrada."
+    echo "  Senha        : conta preservada; use a credencial administrativa já cadastrada."
 fi
 if [ "$MODO_LEVE" = "1" ]; then
     echo ""
