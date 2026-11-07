@@ -1,0 +1,38 @@
+# GWOS — dnsmasq para resolução de nomes internos da LAN
+#
+# MODELO: os marcadores @DOMINIO_LOCAL@ e @DNSMASQ_PORTA@ são substituídos
+# por gwos-gerar-dnsmasq com os valores de /etc/gwos/gwos.conf.
+# O arquivo final fica em /etc/dnsmasq.d/gwos.conf — não edite lá, edite aqui.
+#
+# Arquitetura:
+#   Clientes → BIND9 :53 (RPZ + internet)
+#                  └── @DOMINIO_LOCAL@ → dnsmasq :@DNSMASQ_PORTA@ (este arquivo)
+#
+# Hosts da LAN são gerenciados via: gwos dns add|update|del|list
+# As entradas ficam em /etc/hosts do gateway.
+
+# Porta não-padrão — o BIND9 usa a 53
+port=@DNSMASQ_PORTA@
+
+# Escuta apenas no loopback (o BIND9 encaminha para cá)
+listen-address=127.0.0.1
+bind-interfaces
+
+# Não usa /etc/resolv.conf — toda resolução externa vai pelo BIND9
+no-resolv
+no-poll
+
+# Domínio local padrão: nomes sem ponto resolvem como <host>.@DOMINIO_LOCAL@
+domain=@DOMINIO_LOCAL@
+local=/@DOMINIO_LOCAL@/
+
+# Lê /etc/hosts para resolução de nomes locais
+# (comportamento padrão do dnsmasq — explícito para clareza)
+# addn-hosts=/etc/hosts
+
+# TTL baixo para que mudanças de IP propaguem rápido nos clientes
+local-ttl=60
+
+# Não encaminhar nomes sem ponto para upstream (evita vazar nomes internos)
+domain-needed
+bogus-priv

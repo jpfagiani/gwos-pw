@@ -1,0 +1,1 @@
+# IPs com acesso parcial (apenas whitelist) — gerenciado pelo painel GWOS

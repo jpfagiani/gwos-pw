@@ -1,0 +1,52 @@
+// ============================================================
+// GWOS — BIND9 (módulo 20-dns-bind9)
+// /etc/bind/named.conf.options
+// ============================================================
+
+options {
+    directory "/var/cache/bind";
+
+    // Resolvers upstream — gerado por gwos-integrar a partir de
+    // DNS_FORWARDERS em /etc/gwos/gwos.conf. Contém o bloco
+    // 'forwarders { ... }; forward only;'.
+    // Os domínios internos do governo NÃO passam por aqui: têm
+    // encaminhamento fixo por zona em named.conf.local.
+    include "/etc/bind/named.conf.gwos-forwarders";
+
+    // Aceita consultas apenas da rede interna e do localhost.
+    // "localnets" cobre automaticamente qualquer rede das interfaces locais —
+    // não é preciso editar este arquivo ao trocar o IP do gateway.
+    allow-query     { localhost; localnets; };
+    allow-recursion { localhost; localnets; };
+
+    // ─────────────────────────────────────────────────────────
+    // RPZ — ativa a zona de política de resposta (bloqueio por domínio).
+    // Sem esta diretiva a zona rpz.gwos é carregada mas NUNCA aplicada.
+    // A zona em si é declarada em named.conf.local.
+    // ─────────────────────────────────────────────────────────
+    response-policy { zone "rpz.gwos"; } qname-wait-recurse no;
+
+    // Segurança
+    dnssec-validation no;
+    auth-nxdomain no;
+
+    // Ouve em todas as interfaces (Squid usa 127.0.0.1)
+    listen-on { any; };
+    listen-on-v6 { none; };
+
+    // Desativa transferência de zona
+    allow-transfer { none; };
+};
+
+logging {
+    channel default_log {
+        file "/var/log/named/default.log" versions 3 size 5m;
+        severity dynamic;
+        print-time yes;
+        print-severity yes;
+        print-category yes;
+    };
+    category default { default_log; };
+    category queries { default_log; };
+    category rpz     { default_log; };
+};

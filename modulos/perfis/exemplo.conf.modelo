@@ -1,0 +1,43 @@
+# ============================================================================
+# Perfil de unidade — MODELO
+# ============================================================================
+# Copie este arquivo com o nome da sua unidade e ajuste os valores:
+#
+#   cp modulos/perfis/exemplo.conf.modelo modulos/perfis/minha-unidade.conf
+#
+# O nome do arquivo (sem .conf) é o que aparece na lista do instalador.
+# Este modelo termina em .modelo de propósito: só arquivos .conf viram
+# opção, então ele não polui a lista.
+#
+# Nada aqui é obrigatório — o que você deixar de fora, o instalador pergunta.
+# ============================================================================
+
+# ── Domínio dos nomes internos da LAN ───────────────────────────────────────
+# Os nomes cadastrados com 'gwos dns add' vivem neste domínio.
+# Ex.: 'gwos dns add portal 10.0.0.8' → portal.minhaunidade.local
+DOMINIO_LOCAL="minhaunidade.local"
+
+# ── Resolvers upstream ──────────────────────────────────────────────────────
+# Para onde vai tudo que não é domínio interno. Se a sua rede tem DNS próprio,
+# ponha-o primeiro; senão, deixe só os públicos.
+#
+# ATENÇÃO: o BIND só tenta o próximo resolver em timeout ou SERVFAIL.
+# NXDOMAIN é resposta válida e encerra a busca — um resolver interno que
+# negue domínios externos derruba a internet da rede sem aviso. Depois de
+# instalar, rode:  bash modulos/20-dns-bind9/verificar.sh
+DNS_FORWARDERS="8.8.8.8 8.8.4.4 1.1.1.1"
+
+# ── Domínios que têm DNS próprio ────────────────────────────────────────────
+# Formato: dominio:ip[,ip] separados por espaço. Deixe vazio se não houver.
+# Cada entrada vira zona de encaminhamento fixa — o domínio sempre vai ao
+# servidor certo, sem depender de qual resolver respondeu mais rápido.
+#
+# Ex.: ZONAS_INTERNAS="sistema.sp.gov.br:10.1.6.222 rh.interno:10.2.0.5,10.2.0.6"
+ZONAS_INTERNAS=""
+
+# ── Hora ────────────────────────────────────────────────────────────────────
+# Servidor de hora da sua rede (vazio = só o pool público).
+# Se a rede tem controlador de domínio, use o IP dele: o relógio das estações
+# precisa bater com o dele de qualquer forma.
+NTP_SERVIDORES=""
+NTP_POOL="pool.ntp.br"

@@ -1,0 +1,47 @@
+// ============================================================
+// GWOS — BIND9 Zonas Locais (módulo 20-dns-bind9)
+// /etc/bind/named.conf.local
+// ============================================================
+
+// ---------------------------------------------------------
+// Zona RPZ — gerada automaticamente pelo GWOS
+// Conteúdo atualizado por scripts/aplicar_bind9_rpz.sh (painel).
+// Ativada em named.conf.options pela diretiva response-policy.
+// ---------------------------------------------------------
+zone "rpz.gwos" {
+    type master;
+    file "/etc/bind/db.rpz.gwos";
+    allow-query  { none; };       // RPZ não é consultável diretamente
+    allow-update { none; };
+};
+
+// ---------------------------------------------------------
+// Domínios com DNS próprio (intranet do governo, sistemas
+// internos) NÃO ficam aqui: são específicos de cada unidade e
+// este arquivo é sobrescrito a cada reinstalação do módulo.
+//
+// Eles vêm de ZONAS_INTERNAS no /etc/gwos/gwos.conf — definido
+// pelo perfil da unidade (modulos/perfis/) ou perguntado na
+// instalação — e são criados em named.conf.zonas-locais.
+//
+// Para acrescentar depois:  gwos-zona adicionar <dominio> "<ip>"
+// ---------------------------------------------------------
+
+// ---------------------------------------------------------
+// Integração com os demais módulos do GWOS.
+// Este arquivo é regravado por 'gwos-integrar' e contém o
+// encaminhamento do domínio interno para o dnsmasq (módulo
+// 25-dns-interno), quando ele estiver instalado.
+// ---------------------------------------------------------
+include "/etc/bind/named.conf.gwos-integracao";
+
+// ---------------------------------------------------------
+// Zonas do administrador.
+//
+// ESTE arquivo (named.conf.local) é SOBRESCRITO quando o módulo
+// 20-dns-bind9 é reinstalado. Zonas escritas à mão devem ir para
+// o arquivo abaixo, que o instalador cria uma vez e nunca mais
+// toca. Se a zona for permanente e valer para toda instalação
+// nova, prefira acrescentá-la aqui no repositório.
+// ---------------------------------------------------------
+include "/etc/bind/named.conf.zonas-locais";
