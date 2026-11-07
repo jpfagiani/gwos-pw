@@ -107,14 +107,15 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <form id="formIp" class="d-flex gap-2 mb-3">
+                <form id="formIp" class="row g-2 mb-3 align-items-end">
                     <?= csrf_field() ?>
                     <input type="hidden" name="grupo_id" id="ipGrupoId">
-                    <input type="text" name="endereco" class="form-control form-control-sm" placeholder="192.168.1.10 ou 192.168.1.0/24" required>
-                    <input type="text" name="descricao" class="form-control form-control-sm" placeholder="Descrição (opcional)">
-                    <button type="submit" class="btn btn-sm btn-primary text-nowrap">
+                    <div class="col-md-4"><label class="form-label small">IP ou rede</label><input type="text" name="endereco" class="form-control form-control-sm" placeholder="192.168.1.10" required></div>
+                    <div class="col-md-3"><label class="form-label small">Descrição</label><input type="text" name="descricao" class="form-control form-control-sm" placeholder="Opcional"></div>
+                    <div class="col-md-3"><label class="form-label small">Expiração opcional</label><input type="datetime-local" name="expira_em" class="form-control form-control-sm"></div>
+                    <div class="col-md-2"><button type="submit" class="btn btn-sm btn-primary text-nowrap w-100">
                         <i class="bi bi-plus-lg"></i> Adicionar
-                    </button>
+                    </button></div>
                 </form>
                 <div id="erroIp" class="alert alert-danger d-none small"></div>
                 <div id="listaIps"></div>
@@ -125,6 +126,7 @@
 
 <script>
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
+const escaparHtml = valor => String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 document.getElementById('formGrupo').addEventListener('submit', async e => {
     e.preventDefault();
@@ -168,8 +170,8 @@ async function carregarIps(id) {
         data.ips.map(ip =>
             `<tr>
               <td><span class="badge rounded-pill" style="background:#198754;font-size:.7rem">● ativo</span></td>
-              <td><span class="font-monospace fw-semibold text-primary">${ip.endereco}</span></td>
-              <td class="text-muted small">${ip.descricao || ''}</td>
+              <td><span class="font-monospace fw-semibold text-primary">${escaparHtml(ip.endereco)}</span></td>
+              <td class="text-muted small">${escaparHtml(ip.descricao || '')}${ip.expira_em ? `<div class="text-warning">Expira: ${escaparHtml(ip.expira_em)}</div>` : ''}</td>
               <td class="text-end">
                 <button class="btn btn-sm btn-outline-secondary" title="Remover" onclick="removerIp(${ip.id}, '${ip.endereco}', ${id})">
                   <i class="bi bi-trash3"></i>

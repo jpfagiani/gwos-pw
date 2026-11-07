@@ -118,7 +118,9 @@ class DashboardController extends Controller
             $p    = preg_split('/\s+/', $l);
             $ts   = (int)($p[0] ?? 0);
             $ip   = $p[2] ?? '—';
-            $url  = $p[6] ?? '—';
+            // O log novo insere bytes da requisição antes do método; mantém
+            // compatibilidade com linhas antigas e identifica a URL pela forma da linha.
+            $url  = isset($p[7]) && preg_match('/^[A-Z]{1,16}$/i', $p[6] ?? '') ? $p[7] : ($p[6] ?? '—');
             $host = parse_url($url, PHP_URL_HOST) ?: preg_replace('/:\d+$/', '', $url);
             $bloq = str_contains($p[3] ?? '', 'DENIED') || str_contains($p[3] ?? '', 'BLOCKED');
 
@@ -155,7 +157,7 @@ class DashboardController extends Controller
 
             $ts    = (int)($p[0] ?? 0);
             $ip    = $p[2] ?? '';
-            $url   = $p[6] ?? '';
+            $url   = isset($p[7]) && preg_match('/^[A-Z]{1,16}$/i', $p[6] ?? '') ? $p[7] : ($p[6] ?? '');
             $bytes = (int)($p[4] ?? 0);
             $host  = parse_url($url, PHP_URL_HOST) ?: preg_replace('/:\d+$/', '', $url);
             $bloq  = str_contains($p[3] ?? '', 'DENIED') || str_contains($p[3] ?? '', 'BLOCKED');
@@ -196,9 +198,20 @@ class DashboardController extends Controller
         $totalNat      = (int) Database::valor('SELECT COUNT(*) FROM nat_um_para_um');
 
         $ultimosAcessos = self::lerUltimosAcessos(25);
+        $totalEquipamentos = (int) Database::valor('SELECT COUNT(*) FROM equipamentos');
+        $sessoesAtivas = (int) Database::valor('SELECT COUNT(*) FROM sessoes_internet WHERE expira_em > NOW()');
+        $bloqueiosHoje = (int) Database::valor("SELECT COUNT(*) FROM acessos_internet WHERE DATE(ocorrido_em)=CURDATE() AND (status LIKE '%DENIED%' OR status LIKE '%BLOCKED%')");
+        $bytesHoje = (int) Database::valor('SELECT COALESCE(SUM(bytes),0) FROM acessos_internet WHERE ocorrido_em >= CURDATE()');
+        $uploadHoje = Database::valor('SELECT SUM(request_bytes) FROM acessos_internet WHERE ocorrido_em >= CURDATE()');
+        $alertasAbertos = (int) Database::valor("SELECT COUNT(*) FROM alertas WHERE estado='aberto'");
+        $rankingHoje = \App\Core\Monitoramento::ranking('24h', 5);
+        $alertasRecentes = Database::fetchAll("SELECT id,severidade,titulo,mensagem,estado,atualizado_em FROM alertas WHERE estado<>'resolvido' ORDER BY FIELD(severidade,'critico','aviso','info'), atualizado_em DESC LIMIT 5");
+        $historicoLAN = \App\Core\Monitoramento::historicoRede((string)(Database::valor("SELECT valor FROM configuracoes WHERE chave='iface_lan'")??''));
+        $historicoWAN = \App\Core\Monitoramento::historicoRede((string)(Database::valor("SELECT valor FROM configuracoes WHERE chave='iface_wan'")??''));
 
         $this->view('dashboard/index', compact(
-            'servicos', 'totalIps', 'totalGrupos', 'totalDominios', 'totalNat', 'ultimosAcessos'
+            'servicos', 'totalIps', 'totalGrupos', 'totalDominios', 'totalNat', 'ultimosAcessos',
+            'totalEquipamentos','sessoesAtivas','bloqueiosHoje','bytesHoje','uploadHoje','alertasAbertos','rankingHoje','alertasRecentes','historicoLAN','historicoWAN'
         ));
     }
 

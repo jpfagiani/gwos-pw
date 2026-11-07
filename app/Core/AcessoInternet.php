@@ -264,7 +264,8 @@ class AcessoInternet
                   WHERE id = ?',
                 [password_hash($senha, PASSWORD_BCRYPT, ['cost' => 12]), date('Y-m-d H:i:s'), $t['id']]
             );
-            // Troca de senha derruba as sessões abertas dessa conta
+            // Preserva o histórico antes de encerrar sessões por troca de senha.
+            foreach (Database::fetchAll('SELECT s.*,u.nome,u.email FROM sessoes_internet s JOIN usuarios_internet u ON u.id=s.usuario_id WHERE s.usuario_id=? FOR UPDATE', [$t['id']]) as $sessao) self::arquivarSessao($sessao, 'senha_alterada');
             Database::execute('DELETE FROM sessoes_internet WHERE usuario_id = ?', [$t['id']]);
             $pdo->commit();
         } catch (\Throwable $e) {
@@ -321,18 +322,41 @@ class AcessoInternet
             return [false, $falha, null];
         }
 
+        $maxSessoes = max(1, min(20, (int) self::cfg('acesso_max_sessoes_usuario', '3')));
         $horas  = max(1, (int) self::cfg('acesso_sessao_horas', '8'));
         $expira = date('Y-m-d H:i:s', time() + $horas * 3600);
-
-        // Um IP tem no máximo uma sessão: quem loga por último assume a máquina
-        Database::execute(
-            'REPLACE INTO sessoes_internet (usuario_id, ip, expira_em) VALUES (?, ?, ?)',
-            [$usuario['id'], $ip, $expira]
-        );
-        Database::execute(
-            'UPDATE usuarios_internet SET tentativas = 0, bloqueado_ate = NULL, ultimo_login = ? WHERE id = ?',
-            [date('Y-m-d H:i:s'), $usuario['id']]
-        );
+        $pdo = Database::conectar();
+        $pdo->beginTransaction();
+        try {
+            // Serializa logins da mesma conta para impedir que duas requisições
+            // concorrentes ultrapassem o limite de dispositivos ativos.
+            Database::fetch('SELECT id FROM usuarios_internet WHERE id=? FOR UPDATE', [$usuario['id']]);
+            $sessoesEmOutrosIps = (int) Database::valor(
+                'SELECT COUNT(*) FROM sessoes_internet WHERE usuario_id=? AND ip<>? AND expira_em>NOW()',
+                [$usuario['id'], $ip]
+            );
+            if ($sessoesEmOutrosIps >= $maxSessoes) {
+                $pdo->rollBack();
+                return [false, 'Limite de dispositivos simultâneos atingido. Encerre uma sessão ativa ou contate o administrador.', null];
+            }
+            // Um IP tem no máximo uma sessão; arquiva a anterior antes de assumir a máquina.
+            $anterior=Database::fetch('SELECT s.*,u.nome,u.email FROM sessoes_internet s JOIN usuarios_internet u ON u.id=s.usuario_id WHERE s.ip=? FOR UPDATE', [$ip]);
+            if ($anterior) self::arquivarSessao($anterior, 'substituida');
+            $grupos=implode(' / ', Monitoramento::gruposParaIp($ip));
+            Database::execute(
+                'REPLACE INTO sessoes_internet (usuario_id, ip, expira_em, grupo_snapshot) VALUES (?, ?, ?, ?)',
+                [$usuario['id'], $ip, $expira, $grupos ?: null]
+            );
+            Database::execute(
+                'UPDATE usuarios_internet SET tentativas = 0, bloqueado_ate = NULL, ultimo_login = ? WHERE id = ?',
+                [date('Y-m-d H:i:s'), $usuario['id']]
+            );
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('[GWOS acesso] criar sessão: ' . $e->getMessage());
+            return [false, 'Não foi possível liberar o acesso (erro interno). Avise o administrador.', null];
+        }
 
         if (!self::sincronizar()) {
             Database::execute('DELETE FROM sessoes_internet WHERE ip = ?', [$ip]);
@@ -355,6 +379,7 @@ class AcessoInternet
 
     public static function sair(string $ip): void
     {
+        $s=Database::fetch('SELECT s.*,u.nome,u.email FROM sessoes_internet s JOIN usuarios_internet u ON u.id=s.usuario_id WHERE s.ip=?',[$ip]); if($s) self::arquivarSessao($s,'logout_usuario');
         Database::execute('DELETE FROM sessoes_internet WHERE ip = ?', [$ip]);
         self::sincronizar();
     }
@@ -380,12 +405,14 @@ class AcessoInternet
 
     public static function derrubarSessao(int $id): void
     {
+        $s=Database::fetch('SELECT s.*,u.nome,u.email FROM sessoes_internet s JOIN usuarios_internet u ON u.id=s.usuario_id WHERE s.id=?',[$id]); if($s) self::arquivarSessao($s,'revogada_admin');
         Database::execute('DELETE FROM sessoes_internet WHERE id = ?', [$id]);
         self::sincronizar();
     }
 
     public static function alternarAtivo(int $id): void
     {
+        $u=Database::fetch('SELECT ativo FROM usuarios_internet WHERE id=?',[$id]); if($u && (int)$u['ativo']===1){ foreach(Database::fetchAll('SELECT s.*,u.nome,u.email FROM sessoes_internet s JOIN usuarios_internet u ON u.id=s.usuario_id WHERE s.usuario_id=?',[$id]) as $s) self::arquivarSessao($s,'conta_desativada'); Database::execute('DELETE FROM sessoes_internet WHERE usuario_id=?',[$id]); }
         Database::execute('UPDATE usuarios_internet SET ativo = 1 - ativo WHERE id = ?', [$id]);
         // Desativar derruba as sessões; sincronizar() já ignora quem está inativo
         self::sincronizar();
@@ -393,11 +420,20 @@ class AcessoInternet
 
     public static function excluirUsuario(int $id): void
     {
+        foreach(Database::fetchAll('SELECT s.*,u.nome,u.email FROM sessoes_internet s JOIN usuarios_internet u ON u.id=s.usuario_id WHERE s.usuario_id=?',[$id]) as $s) self::arquivarSessao($s,'usuario_excluido');
         Database::execute('DELETE FROM usuarios_internet WHERE id = ?', [$id]);  // cascata: sessões e tokens
         self::sincronizar();
     }
 
     // ── ponte com o Squid ───────────────────────────────────────────────────
+    /** Persiste o encerramento sem depender da existência futura da conta. */
+    private static function arquivarSessao(array $s, string $motivo): void
+    {
+        $fim=date('Y-m-d H:i:s'); $inicio=(string)($s['criado_em']??$fim);
+        $duracao=max(0,strtotime($fim)-(strtotime($inicio)?:strtotime($fim)));
+        Database::execute('INSERT INTO sessoes_internet_historico (usuario_id,nome_usuario,email,ip,mac,hostname,grupo_snapshot,iniciou_em,expira_previsto_em,encerrou_em,duracao_segundos,motivo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',[$s['usuario_id']??null,(string)($s['nome']??''),(string)($s['email']??''),(string)$s['ip'],$s['mac']??null,$s['hostname']??null,$s['grupo_snapshot']??null,$inicio,$s['expira_em'],$fim,$duracao,$motivo]);
+    }
+
     /**
      * Regrava SESSOES_ARQ com as sessões válidas: "ip<TAB>expira_epoch<TAB>e-mail".
      * Escrita atômica (arquivo temporário + rename) para o helper nunca ler
@@ -405,7 +441,10 @@ class AcessoInternet
      */
     public static function sincronizar(): bool
     {
+        $pdo=Database::conectar();
         try {
+            $pdo->beginTransaction();
+            foreach(Database::fetchAll('SELECT s.*,u.nome,u.email FROM sessoes_internet s JOIN usuarios_internet u ON u.id=s.usuario_id WHERE s.expira_em<=? FOR UPDATE',[date('Y-m-d H:i:s')]) as $s) self::arquivarSessao($s,'expirada');
             Database::execute('DELETE FROM sessoes_internet WHERE expira_em <= ?', [date('Y-m-d H:i:s')]);
             $linhas = Database::fetchAll(
                 'SELECT s.ip, s.expira_em, u.email
@@ -413,7 +452,9 @@ class AcessoInternet
                   WHERE u.ativo = 1 AND s.expira_em > ?',
                 [date('Y-m-d H:i:s')]
             );
+            $pdo->commit();
         } catch (\Throwable $e) {
+            if($pdo->inTransaction()) $pdo->rollBack();
             error_log('[GWOS acesso] sincronizar (banco): ' . $e->getMessage());
             return false;
         }

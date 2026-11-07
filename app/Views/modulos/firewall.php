@@ -86,9 +86,10 @@
                     <?= csrf_field() ?>
                     <button class="btn btn-sm btn-primary">Regerar regras</button>
                 </form>
+                <button class="btn btn-sm btn-outline-primary w-100 mt-2" id="btnPreviewFirewall" type="button">Validar e comparar alterações</button>
+                <div id="previewFirewall" class="mt-2 d-none"><div id="estadoPreview" class="small mb-1"></div><pre id="diffFirewall" class="bg-body-tertiary border rounded p-2 small" style="max-height:18rem;overflow:auto;white-space:pre-wrap"></pre></div>
                 <p class="text-secondary small mt-2 mb-0">
-                    Valida com <code>nft -c</code> antes de aplicar. Se as regras
-                    novas não passarem, as atuais continuam.
+                    A prévia executa <code>nft -c</code> e mostra o diff sem alterar regras. Na aplicação, o estado anterior é versionado e restaurado se a pós-checagem falhar.
                 </p>
             </div>
         </div>
@@ -131,5 +132,17 @@ document.getElementById('btnAlternar').addEventListener('click', (ev) => {
     const bloco = document.getElementById('blocoRuleset');
     const oculto = bloco.classList.toggle('d-none');
     ev.target.textContent = oculto ? 'Mostrar' : 'Ocultar';
+});
+document.getElementById('btnPreviewFirewall').addEventListener('click', async ev => {
+    const area=document.getElementById('previewFirewall'),estado=document.getElementById('estadoPreview'),diff=document.getElementById('diffFirewall');
+    area.classList.remove('d-none');estado.textContent='Gerando diff e validando ruleset…';diff.textContent='';ev.currentTarget.disabled=true;
+    try {
+        const csrf=document.querySelector('form[action="/modulos/firewall/regerar"] input[name="_csrf"]').value;
+        const body=new FormData();body.append('_csrf',csrf);
+        const res=await fetch('/modulos/firewall/preview',{method:'POST',body,headers:{'Accept':'application/json'}});
+        const data=await res.json();if(!res.ok)throw new Error(data.erro||'Falha ao validar prévia.');
+        estado.textContent=data.validado?'Prévia validada; nenhuma regra foi aplicada.':'Prévia gerada; confira o resultado.';diff.textContent=data.diff||'Sem diferenças.';
+    } catch(e) {estado.textContent=e.message||'Falha ao gerar prévia.';}
+    finally {ev.currentTarget.disabled=false;}
 });
 </script>

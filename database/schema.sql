@@ -386,6 +386,7 @@ CREATE TABLE IF NOT EXISTS sessoes_internet (
     ip          VARCHAR(45)      NOT NULL,
     criado_em   DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expira_em   DATETIME         NOT NULL,
+    grupo_snapshot VARCHAR(255) NULL,
     UNIQUE KEY uk_ip (ip),
     FOREIGN KEY (usuario_id) REFERENCES usuarios_internet(id) ON DELETE CASCADE,
     INDEX idx_expira (expira_em)
@@ -395,6 +396,17 @@ CREATE TABLE IF NOT EXISTS sessoes_internet (
 -- Registro de acessos: um registro por requisição do access.log do Squid
 -- (data/hora, IP da máquina, e-mail do usuário, site acessado).
 -- ------------------------------------------------------------
+-- Histórico persistente de sessões do portal, inclusive após remoção de usuário.
+CREATE TABLE IF NOT EXISTS sessoes_internet_historico (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ usuario_id INT UNSIGNED NULL, nome_usuario VARCHAR(100) NOT NULL, email VARCHAR(150) NOT NULL,
+ ip VARCHAR(45) NOT NULL, mac VARCHAR(17) NULL, hostname VARCHAR(253) NULL, grupo_snapshot VARCHAR(255) NULL,
+ iniciou_em DATETIME NOT NULL, expira_previsto_em DATETIME NOT NULL, encerrou_em DATETIME NOT NULL,
+ duracao_segundos INT UNSIGNED NOT NULL DEFAULT 0,
+ motivo ENUM('logout_usuario','expirada','revogada_admin','conta_desativada','senha_alterada','substituida','usuario_excluido') NOT NULL,
+ INDEX idx_sess_hist_data (encerrou_em), INDEX idx_sess_hist_ip (ip,encerrou_em), INDEX idx_sess_hist_email (email,encerrou_em)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS acessos_internet (
     id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     ocorrido_em  DATETIME          NOT NULL,
@@ -405,6 +417,9 @@ CREATE TABLE IF NOT EXISTS acessos_internet (
     url          VARCHAR(1000)     NOT NULL,
     status       VARCHAR(40)       NOT NULL,
     bytes        BIGINT UNSIGNED   NOT NULL DEFAULT 0,
+    request_bytes BIGINT UNSIGNED  NULL DEFAULT NULL,
+    log_key      CHAR(64)          NULL,
+    UNIQUE KEY uq_acessos_log_key (log_key),
     INDEX idx_quando (ocorrido_em),
     INDEX idx_ip     (ip, ocorrido_em),
     INDEX idx_email  (email, ocorrido_em),
@@ -425,6 +440,8 @@ ALTER TABLE ip_grupos
 INSERT IGNORE INTO configuracoes (chave, valor, descricao) VALUES
 ('acesso_dominio_email', 'sap.sp.gov.br', 'Único domínio de e-mail aceito no cadastro'),
 ('acesso_sessao_horas',  '8',             'Duração da sessão após o login (horas)'),
+('acesso_max_sessoes_usuario', '3',       'Máximo de dispositivos com sessão de internet simultânea por usuário'),
+('alerta_dns_dominio', 'debian.org',     'Domínio usado pelo teste de resolução DNS no alerta periódico'),
 ('smtp_host',            '10.14.5.16',    'Servidor SMTP para os e-mails do portal'),
 ('smtp_porta',           '25',            'Porta SMTP'),
 ('smtp_seguranca',       'nenhuma',       'nenhuma | starttls | ssl'),

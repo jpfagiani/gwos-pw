@@ -31,6 +31,7 @@
         <a href="/acesso/cadastro">Primeiro acesso</a>
         <a href="/acesso/esqueci">Esqueci minha senha</a>
     </div>
+    <p class="text-muted small mt-3 mb-0">Cada conta pode manter até <?= h(\App\Core\AcessoInternet::cfg('acesso_max_sessoes_usuario', '3')) ?> dispositivos conectados ao mesmo tempo. Ao atingir o limite, encerre uma sessão ativa antes de entrar em outro dispositivo.</p>
 <?php endif; ?>
 
 <?php require __DIR__ . '/_fim.php'; ?>

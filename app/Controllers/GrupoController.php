@@ -13,7 +13,7 @@ class GrupoController extends Controller
         $grupos = Database::fetchAll(
             'SELECT g.*, COUNT(i.id) as total_ips
              FROM ip_grupos g
-             LEFT JOIN ips i ON i.grupo_id = g.id AND i.ativo = 1
+             LEFT JOIN ips i ON i.grupo_id = g.id AND i.ativo = 1 AND (i.expira_em IS NULL OR i.expira_em > NOW())
              GROUP BY g.id
              ORDER BY g.nome'
         );
@@ -81,9 +81,18 @@ class GrupoController extends Controller
 
         $endereco  = trim($_POST['endereco'] ?? '');
         $descricao = trim($_POST['descricao'] ?? '');
+        $expira = trim((string)($_POST['expira_em'] ?? ''));
 
         if (!ip_valido($endereco)) {
             json_resposta(['erro' => 'Endereço IP inválido.'], 422);
+        }
+        $expiraSql = null;
+        if ($expira !== '') {
+            $dt = \DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $expira);
+            if (!$dt || $dt->format('Y-m-d\TH:i') !== $expira || $dt <= new \DateTimeImmutable()) {
+                json_resposta(['erro' => 'A expiração temporária deve ser uma data futura válida.'], 422);
+            }
+            $expiraSql = $dt->format('Y-m-d H:i:s');
         }
 
         $grupo = Database::fetch('SELECT id FROM ip_grupos WHERE id = ?', [$id]);
@@ -93,12 +102,12 @@ class GrupoController extends Controller
         if ($existe) { json_resposta(['erro' => 'IP já cadastrado neste grupo.'], 409); }
 
         $ipId = Database::insert(
-            'INSERT INTO ips (grupo_id, endereco, descricao) VALUES (?, ?, ?)',
-            [$id, $endereco, $descricao]
+            'INSERT INTO ips (grupo_id, endereco, descricao, expira_em) VALUES (?, ?, ?, ?)',
+            [$id, $endereco, $descricao, $expiraSql]
         );
 
         $tarefa = $this->aplicarRegras();
-        Auditoria::registrar('adicionar_ip', 'ips', (int)$ipId, null, ['grupo_id' => $id, 'endereco' => $endereco, 'tarefa_id' => $tarefa]);
+        Auditoria::registrar('adicionar_ip', 'ips', (int)$ipId, null, ['grupo_id' => $id, 'endereco' => $endereco, 'expira_em' => $expiraSql, 'tarefa_id' => $tarefa]);
 
         json_resposta(['sucesso' => 'IP adicionado; aplicação enfileirada.', 'id' => $ipId, 'tarefa_id' => $tarefa]);
     }

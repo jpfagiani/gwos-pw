@@ -23,7 +23,7 @@
             <div class="d-flex align-items-center gap-1 text-muted small">
                 <i class="bi bi-activity"></i>
                 <span class="text-success fw-semibold" id="infoConn">—</span>
-                <span>conexões hoje</span>
+                <span>IPs ativos hoje</span>
             </div>
 
             <div class="ms-auto d-flex flex-wrap gap-2">
@@ -53,6 +53,17 @@
     <div class="col-6 col-lg-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-2"><small class="text-muted">Memória</small><div id="infoMemoria" class="fw-semibold">—</div></div></div></div>
     <div class="col-6 col-lg-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-2"><small class="text-muted">Disco raiz</small><div id="infoDisco" class="fw-semibold">—</div></div></div></div>
     <div class="col-6 col-lg-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-2"><small class="text-muted">Ligado há</small><div id="infoUptime" class="fw-semibold">—</div></div></div></div>
+</div>
+
+<div class="row g-3 mb-4">
+    <?php foreach ([['Equipamentos observados',$totalEquipamentos,'/equipamentos','pc-display'],['Sessões de internet ativas',$sessoesAtivas,'/internet','person-check'],['Bloqueios registrados hoje',$bloqueiosHoje,'/monitoramento?decisao=bloqueado','shield-x'],['Download HTTP hoje',formatar_bytes($bytesHoje),'/ranking','cloud-download'],['Upload HTTP hoje',$uploadHoje===null?'sem dados':formatar_bytes((int)$uploadHoje),'/ranking','cloud-upload'],['Alertas abertos',$alertasAbertos,'/alertas','bell']] as [$rotulo,$valor,$url,$icone]): ?>
+    <div class="col-6 col-lg"><a class="text-decoration-none" href="<?=h($url)?>"><div class="card h-100"><div class="card-body py-3"><div class="text-muted small"><i class="bi bi-<?=h($icone)?> me-1"></i><?=h($rotulo)?></div><div class="fs-4 fw-bold text-dark"><?=h((string)$valor)?></div></div></div></a></div>
+    <?php endforeach; ?>
+</div>
+
+<div class="row g-3 mb-4">
+ <div class="col-lg-7"><div class="card h-100"><div class="card-header d-flex justify-content-between"><strong>Maiores volumes nas últimas 24h</strong><a href="/ranking">Ver ranking</a></div><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Dispositivo</th><th>IP</th><th class="text-end">Download HTTP</th><th class="text-end">Upload HTTP</th></tr></thead><tbody><?php foreach($rankingHoje as $r):?><tr><td><?=h($r['equipamento'])?></td><td class="font-monospace"><?=h($r['ip'])?></td><td class="text-end"><?=formatar_bytes((int)$r['download_bytes'])?></td><td class="text-end"><?=$r['upload_bytes']===null?'sem dados':formatar_bytes((int)$r['upload_bytes'])?></td></tr><?php endforeach;?><?php if(!$rankingHoje):?><tr><td colspan="4" class="text-muted text-center">Sem dados medidos nas últimas 24h.</td></tr><?php endif;?></tbody></table></div><div class="card-footer small text-muted">Volumes de requisições HTTP observadas no Squid. Não abrangem fluxos bypassados nem representam todo o tráfego de rede.</div></div></div>
+ <div class="col-lg-5"><div class="card h-100"><div class="card-header d-flex justify-content-between"><strong>Alertas ativos</strong><a href="/alertas">Ver todos</a></div><div class="list-group list-group-flush"><?php foreach($alertasRecentes as $a):?><div class="list-group-item"><span class="badge bg-<?=($a['severidade']==='critico'?'danger':'warning')?> me-1"><?=h($a['severidade'])?></span><strong><?=h($a['titulo'])?></strong><div class="small text-muted"><?=h($a['mensagem'])?></div></div><?php endforeach;?><?php if(!$alertasRecentes):?><div class="list-group-item text-muted">Sem alertas ativos.</div><?php endif;?></div></div></div>
 </div>
 
 <!-- Contadores resumo -->
@@ -141,8 +152,8 @@
 <!-- Acessos em tempo real -->
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white d-flex align-items-center justify-content-between py-2">
-        <span class="fw-semibold small"><i class="bi bi-broadcast text-danger me-1"></i>Acessos em tempo real</span>
-        <span class="badge bg-success">ao vivo</span>
+        <span class="fw-semibold small"><i class="bi bi-broadcast text-danger me-1"></i>Atividade recente do Squid</span>
+        <span class="badge bg-secondary">atualiza a cada 5 s</span>
     </div>
     <div style="max-height:200px;overflow-y:auto">
         <table class="table table-hover table-sm mb-0 small">
@@ -208,9 +219,13 @@
 <script src="/assets/js/chart.umd.min.js"></script>
 <script>
 (function(){
-    const pts = 30, lbs = Array(pts).fill('');
-    const rxL = Array(pts).fill(0), txL = Array(pts).fill(0);
-    const rxW = Array(pts).fill(0), txW = Array(pts).fill(0);
+    const historicoLAN = <?= json_encode($historicoLAN, JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) ?>;
+    const historicoWAN = <?= json_encode($historicoWAN, JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) ?>;
+    const pts = 30;
+    const serie = valores => [...Array(Math.max(0,pts-valores.length)).fill(null), ...valores.slice(-pts)];
+    const lbs = [...Array(Math.max(0,pts-historicoLAN.labels.length)).fill(''), ...historicoLAN.labels.slice(-pts)];
+    const rxL = serie(historicoLAN.rx), txL = serie(historicoLAN.tx);
+    const rxW = serie(historicoWAN.rx), txW = serie(historicoWAN.tx);
     let last = null;
 
     function mkChart(id, d1, d2, c1, c2){
@@ -254,7 +269,7 @@
             const valido = [d.lan_rx,d.lan_tx,d.wan_rx,d.wan_tx].every(Number.isFinite);
             const agora = Date.now();
             const coleta = document.getElementById('infoColeta');
-            if (coleta) coleta.textContent = 'Coleta: ' + new Date(d.coletado_em).toLocaleTimeString('pt-BR');
+            if (coleta) coleta.textContent = 'Atualização da tela: ' + new Date(d.coletado_em).toLocaleTimeString('pt-BR') + ' · histórico do sistema em intervalo de 1 min';
             if(!valido){
                 last = null;
                 document.getElementById('lanLabel').textContent = 'sem dados de interface';
@@ -273,6 +288,7 @@
                 } else {
                     rxL.push(dLanRx); rxL.shift(); txL.push(dLanTx); txL.shift();
                     rxW.push(dWanRx); rxW.shift(); txW.push(dWanTx); txW.shift();
+                    lbs.push(new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})); lbs.shift();
                     cL.options.scales.y.max = Math.max(...rxL,...txL)*1.2||1;
                     cW.options.scales.y.max = Math.max(...rxW,...txW)*1.2||1;
                     cL.update(); cW.update();

@@ -59,6 +59,20 @@ class FirewallController extends Controller
         $this->redirect('/modulos/firewall');
     }
 
+    public function preview(): void
+    {
+        Auth::exigir();
+        $this->exigirModulo();
+        $script=config('sistema.scripts_dir').'/aplicar_nftables.sh';
+        if(!is_executable($script)) $this->json(['erro'=>'O gerador do firewall não está instalado.'],503);
+        $proc=@proc_open(['/usr/bin/timeout','20s','/usr/bin/sudo','-n',$script,'--preview'],
+            [0=>['file','/dev/null','r'],1=>['pipe','w'],2=>['file','/dev/null','a']],$pipes,BASE_PATH,null,['bypass_shell'=>true]);
+        if(!is_resource($proc)) $this->json(['erro'=>'Não foi possível iniciar a prévia segura.'],503);
+        $diff=stream_get_contents($pipes[1],1000000); fclose($pipes[1]); $codigo=proc_close($proc);
+        if($codigo!==0) $this->json(['erro'=>'A validação da prévia falhou. Confira permissões, banco e logs do firewall.'],422);
+        $this->json(['diff'=>$diff,'validado'=>str_contains((string)$diff,'PREVIEW_VALIDADO')]);
+    }
+
     private function exigirModulo(): void
     {
         if (!Modulos::temModulo('firewall-nftables')) {

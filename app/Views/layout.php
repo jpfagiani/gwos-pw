@@ -200,6 +200,24 @@ $hostPainel = parse_url(config('app.url', ''), PHP_URL_HOST) ?: '';
         <a class="nav-link <?= $menuAtual === 'horarios' ? 'active' : '' ?>" href="/horarios">
             <i class="bi bi-clock-fill"></i> Horários
         </a>
+        <a class="nav-link <?= in_array($menuAtual, ['agenda'] , true) ? 'active' : '' ?>" href="/agenda">
+            <i class="bi bi-calendar-week"></i> Agenda e simulador
+        </a>
+        <a class="nav-link <?= $menuAtual === 'monitoramento' ? 'active' : '' ?>" href="/monitoramento">
+            <i class="bi bi-activity"></i> Monitoramento
+        </a>
+        <a class="nav-link <?= $menuAtual === 'ranking' ? 'active' : '' ?>" href="/ranking">
+            <i class="bi bi-bar-chart-line"></i> Ranking de consumo
+        </a>
+        <a class="nav-link <?= $menuAtual === 'equipamentos' ? 'active' : '' ?>" href="/equipamentos">
+            <i class="bi bi-pc-display"></i> Equipamentos
+        </a>
+        <a class="nav-link <?= $menuAtual === 'controle-acesso' ? 'active' : '' ?>" href="/controle-acesso">
+            <i class="bi bi-shield-check"></i> Controle de acesso
+        </a>
+        <a class="nav-link <?= $menuAtual === 'alertas' ? 'active' : '' ?>" href="/alertas">
+            <i class="bi bi-bell"></i> Alertas e eventos
+        </a>
         <?php endif; ?>
 
         <?php foreach ($menuModulos as $secao => $itens): ?>
