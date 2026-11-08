@@ -27,6 +27,9 @@ class AcessoInternet
     private const MAX_TOKENS_USER  = 3;     // por hora, por usuário
     private const MAX_TOKENS_IP    = 10;    // por hora, por IP de origem
 
+    public const MSG_SEM_EMAIL = 'O envio de e-mail está indisponível no momento. '
+        . 'Procure o administrador da rede: ele pode criar sua senha de acesso diretamente.';
+
     // ── configuração ─────────────────────────────────────────────────────────
     public static function cfg(string $chave, string $padrao = ''): string
     {
@@ -126,11 +129,15 @@ class AcessoInternet
             return [true, $generico];   // conta desativada: não revela nem envia
         }
 
+        Mailer::$ultimoErro = '';
         if ($usuario['confirmado_em']) {
             // Já cadastrado: em vez de repetir o cadastro, lembra do "esqueci a senha"
-            self::enviarLink($usuario, 'redefinir', $ip, true);
+            $enviou = self::enviarLink($usuario, 'redefinir', $ip, true);
         } else {
-            self::enviarLink($usuario, 'confirmar', $ip, false);
+            $enviou = self::enviarLink($usuario, 'confirmar', $ip, false);
+        }
+        if (!$enviou && Mailer::$ultimoErro !== '') {
+            return [false, self::MSG_SEM_EMAIL];
         }
         return [true, $generico];
     }
@@ -151,7 +158,10 @@ class AcessoInternet
         $usuario = Database::fetch('SELECT * FROM usuarios_internet WHERE email = ? AND ativo = 1', [$email]);
         if ($usuario) {
             $tipo = $usuario['confirmado_em'] ? 'redefinir' : 'confirmar';
-            self::enviarLink($usuario, $tipo, $ip, false);
+            Mailer::$ultimoErro = '';
+            if (!self::enviarLink($usuario, $tipo, $ip, false) && Mailer::$ultimoErro !== '') {
+                return [false, self::MSG_SEM_EMAIL];
+            }
         }
         return [true, $generico];
     }
@@ -276,6 +286,72 @@ class AcessoInternet
 
         self::sincronizar();
         return [true, 'Senha criada! Faça o login para liberar a internet.'];
+    }
+
+    // ── gestão pelo administrador ───────────────────────────────────────────
+    /** Cria (ou confirma) um usuário já com a senha digitada pelo admin. */
+    public static function criarUsuarioAdmin(string $nome, string $email, string $senha): array
+    {
+        $nome  = trim(preg_replace('/\s+/', ' ', $nome));
+        $email = self::normalizarEmail($email);
+        if (self::tamanho($nome) < 3 || self::tamanho($nome) > 100) {
+            return [false, 'Informe o nome completo (mínimo 3 letras).'];
+        }
+        if (!self::emailPermitido($email)) {
+            return [false, 'Só é aceito e-mail institucional @' . self::dominioPermitido() . '.'];
+        }
+        if ($erro = self::validarSenha($senha)) {
+            return [false, $erro];
+        }
+        if (Database::fetch('SELECT id FROM usuarios_internet WHERE email = ?', [$email])) {
+            return [false, 'Já existe um usuário com esse e-mail. Use "Definir senha" na lista.'];
+        }
+        $id = (int) Database::insert(
+            'INSERT INTO usuarios_internet (nome, email, senha, confirmado_em) VALUES (?, ?, ?, ?)',
+            [$nome, $email, password_hash($senha, PASSWORD_BCRYPT, ['cost' => 12]), date('Y-m-d H:i:s')]
+        );
+        return [true, $id];
+    }
+
+    /** Define/redefine a senha de um usuário (admin digita). Encerra as sessões dele. */
+    public static function definirSenhaAdmin(int $id, string $senha): array
+    {
+        if ($erro = self::validarSenha($senha)) {
+            return [false, $erro];
+        }
+        $u = Database::fetch('SELECT id FROM usuarios_internet WHERE id = ?', [$id]);
+        if (!$u) {
+            return [false, 'Usuário não encontrado.'];
+        }
+        Database::execute(
+            'UPDATE usuarios_internet SET senha = ?, confirmado_em = COALESCE(confirmado_em, ?), tentativas = 0, bloqueado_ate = NULL WHERE id = ?',
+            [password_hash($senha, PASSWORD_BCRYPT, ['cost' => 12]), date('Y-m-d H:i:s'), $id]
+        );
+        Database::execute('UPDATE tokens_internet SET usado_em = ? WHERE usuario_id = ? AND usado_em IS NULL', [date('Y-m-d H:i:s'), $id]);
+        foreach (Database::fetchAll('SELECT s.*,u.nome,u.email FROM sessoes_internet s JOIN usuarios_internet u ON u.id=s.usuario_id WHERE s.usuario_id=?', [$id]) as $sessao) {
+            self::arquivarSessao($sessao, 'senha_alterada');
+        }
+        Database::execute('DELETE FROM sessoes_internet WHERE usuario_id = ?', [$id]);
+        self::sincronizar();
+        return [true, 'Senha definida.'];
+    }
+
+    /** Gera um link de senha (sem enviar e-mail) para o admin repassar. Sem limite de taxa. */
+    public static function gerarLinkAdmin(int $id): ?array
+    {
+        $u = Database::fetch('SELECT * FROM usuarios_internet WHERE id = ? AND ativo = 1', [$id]);
+        if (!$u) {
+            return null;
+        }
+        $tipo    = $u['confirmado_em'] ? 'redefinir' : 'confirmar';
+        $minutos = $tipo === 'confirmar' ? self::TOKEN_CONFIRMAR : self::TOKEN_REDEFINIR;
+        $token   = bin2hex(random_bytes(32));
+        Database::execute('UPDATE tokens_internet SET usado_em = ? WHERE usuario_id = ? AND usado_em IS NULL', [date('Y-m-d H:i:s'), $id]);
+        Database::insert(
+            'INSERT INTO tokens_internet (usuario_id, tipo, token_hash, expira_em, ip) VALUES (?, ?, ?, ?, ?)',
+            [$id, $tipo, hash('sha256', $token), date('Y-m-d H:i:s', time() + $minutos * 60), 'admin']
+        );
+        return ['link' => self::urlBase() . '/acesso/senha?t=' . $token, 'minutos' => $minutos, 'email' => $u['email']];
     }
 
     public static function validarSenha(string $senha): ?string
