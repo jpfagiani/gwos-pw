@@ -206,8 +206,10 @@ APP_DEBUG=false
 # reexecute este módulo para ligar o painel completo.
 ENV
 fi
-chmod 600 "${REPO}/.env"
-chown www-data:www-data "${REPO}/.env"
+chown root:root "$REPO"
+chmod go-w "$REPO"
+chown root:www-data "${REPO}/.env"
+chmod 0640 "${REPO}/.env"
 ok ".env do painel criado."
 
 # ---------------------------------------------------------------------------
@@ -369,7 +371,7 @@ SUDOERS_TMP="$(mktemp /tmp/gwos_sudoers_gwos.XXXXXX)"
 {
     echo "Defaults:www-data !requiretty"
     for s in aplicar_nftables aplicar_nat aplicar_bind9_rpz gerar_squid_dominios \
-             gerar_squid_acl backup restaurar_backup importar_log_squid aplicar_dns_hosts; do
+             gerar_squid_acl importar_log_squid aplicar_dns_hosts; do
         [ -f "${REPO}/scripts/${s}.sh" ] && \
             echo "www-data ALL=(root) NOPASSWD: ${REPO}/scripts/${s}.sh"
     done
@@ -415,7 +417,7 @@ cat > /etc/cron.d/gwos <<CRON
 * * * * * root /usr/bin/php ${REPO}/scripts/importar_acessos_squid.php >> /var/log/gwos_acessos.log 2>&1
 * * * * * root /usr/bin/php ${REPO}/scripts/coletar_alertas.php >> /var/log/gwos_alertas.log 2>&1
 * * * * * root /usr/bin/php ${REPO}/scripts/coletar_metricas_rede.php >> /var/log/gwos_metricas.log 2>&1
-* * * * * www-data /usr/bin/php ${REPO}/scripts/expirar_politicas.php >> /var/log/gwos_politicas.log 2>&1
+* * * * * www-data /usr/bin/php ${REPO}/scripts/expirar_politicas.php 2>&1 | /usr/bin/logger -t gwos-politicas
 * * * * * root /usr/bin/php ${REPO}/scripts/descobrir_equipamentos.php >> /var/log/gwos_equipamentos.log 2>&1
 * * * * * www-data /usr/bin/php ${REPO}/scripts/processar_tarefas.php >/dev/null 2>&1
 CRON
@@ -439,7 +441,9 @@ if getent group proxy >/dev/null; then chown www-data:proxy /var/lib/gwos/sessio
 chmod 0640 /var/lib/gwos/sessions/sessoes.txt
 chown root:root /var/lib/gwos/backups
 chmod 0700 /var/lib/gwos/backups
-chown -R www-data:www-data "${REPO}/public" "${REPO}/storage"
+chown -R root:root "${REPO}/public"
+chmod -R go-w "${REPO}/public"
+chown -R www-data:www-data "${REPO}/storage"
 chmod 2770 "${REPO}/storage/tarefas"
 usermod -aG proxy www-data 2>/dev/null || true   # leitura do access.log do Squid
 systemctl restart "php${PHP_VER}-fpm" 2>/dev/null || true
@@ -493,7 +497,7 @@ SENHA_INICIAL=""; ADMIN_SENHA=""
 # Publica a CA do Squid, se existir
 if tem_ssl_bump; then
     install -m 644 /etc/squid/ssl_cert/gwos-ca.crt "${REPO}/public/gwos-ca.crt"
-    chown www-data:www-data "${REPO}/public/gwos-ca.crt"
+    chown root:root "${REPO}/public/gwos-ca.crt"
     ok "CA do Squid publicada para download."
 fi
 

@@ -74,6 +74,10 @@ $router->post('/acesso/senha',     'AcessoController@definirSenha');
 // Administração (exige login de administrador)
 $router->get('/internet',                           'InternetController@index');
 $router->get('/internet/logs',                      'InternetController@logs');
+$router->post('/internet/usuarios',                 'InternetController@criarUsuario');
+$router->post('/internet/usuarios/{id}/senha',      'InternetController@definirSenha');
+$router->post('/internet/usuarios/{id}/link',       'InternetController@gerarLink');
+$router->post('/internet/smtp',                     'InternetController@salvarSmtp');
 $router->post('/internet/teste-email',              'InternetController@testeEmail');
 $router->post('/internet/sessoes/{id}/derrubar',    'InternetController@derrubar');
 $router->post('/internet/usuarios/{id}/alternar',   'InternetController@alternar');

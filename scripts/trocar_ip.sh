@@ -15,7 +15,8 @@
 set -euo pipefail
 
 GWOS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-[ -f "$GWOS_DIR/.env" ] && { set -a; source "$GWOS_DIR/.env"; set +a; }
+source "$GWOS_DIR/scripts/ler_env.sh"
+gwos_ler_env "$GWOS_DIR/.env"
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; B='\033[1m'; N='\033[0m'
 ok()   { echo -e "${G}[OK]${N} $*"; }

@@ -143,7 +143,7 @@ if [ -n "$CERTGEN" ]; then
     # Publica a CA para download, se o painel existir
     if REPO="$(raiz_projeto)"; then
         install -m 644 "${SSL_DIR}/gwos-ca.crt" "${REPO}/public/gwos-ca.crt"
-        chown www-data:www-data "${REPO}/public/gwos-ca.crt" 2>/dev/null || true
+        chown root:root "${REPO}/public/gwos-ca.crt" 2>/dev/null || true
         ok "CA publicada em http://${IP_GATEWAY}/gwos-ca.crt"
     else
         aviso "Projeto não encontrado — copie ${SSL_DIR}/gwos-ca.crt para os clientes à mão."

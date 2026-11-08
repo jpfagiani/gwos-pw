@@ -6,7 +6,8 @@ set -euo pipefail
 umask 077
 
 GWOS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -f "$GWOS_DIR/.env" ]; then set -a; source "$GWOS_DIR/.env"; set +a; fi
+source "$GWOS_DIR/scripts/ler_env.sh"
+gwos_ler_env "$GWOS_DIR/.env"
 
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_BANCO="${DB_BANCO:-gwos}"
@@ -20,23 +21,23 @@ chmod 700 "$BACKUP_DIR"
 
 DATA=$(date +%Y%m%d_%H%M%S)
 ARQUIVO="gwos_backup_${DATA}.tar.gz"
-TMP="/tmp/gwos_bkp_${DATA}"
-mkdir -p "$TMP"
+TMP="$(mktemp -d /tmp/gwos_backup.XXXXXX)"
+mkdir "$TMP/gwos_bkp_${DATA}"
 trap 'rm -rf "$TMP" "${BACKUP_DIR}/${ARQUIVO}.tmp"' EXIT
 
 # Dump do banco
 mysqldump -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" \
     --single-transaction --routines --triggers \
-    "$DB_BANCO" > "$TMP/banco.sql"
+    "$DB_BANCO" > "$TMP/gwos_bkp_${DATA}/banco.sql"
 
 # Arquivos de configuração
-cp /etc/nftables.conf          "$TMP/" 2>/dev/null || true
-cp /etc/bind/named.conf.local  "$TMP/" 2>/dev/null || true
-cp /etc/bind/db.rpz.gwos       "$TMP/" 2>/dev/null || true
-cp /etc/squid/squid.conf       "$TMP/" 2>/dev/null || true
+cp /etc/nftables.conf          "$TMP/gwos_bkp_${DATA}/" 2>/dev/null || true
+cp /etc/bind/named.conf.local  "$TMP/gwos_bkp_${DATA}/" 2>/dev/null || true
+cp /etc/bind/db.rpz.gwos       "$TMP/gwos_bkp_${DATA}/" 2>/dev/null || true
+cp /etc/squid/squid.conf       "$TMP/gwos_bkp_${DATA}/" 2>/dev/null || true
 
 # Compacta
-tar -czf "$BACKUP_DIR/${ARQUIVO}.tmp" -C /tmp "gwos_bkp_${DATA}"
+tar -czf "$BACKUP_DIR/${ARQUIVO}.tmp" -C "$TMP" "gwos_bkp_${DATA}"
 gzip -t "$BACKUP_DIR/${ARQUIVO}.tmp"
 tar -tzf "$BACKUP_DIR/${ARQUIVO}.tmp" >/dev/null
 mv "$BACKUP_DIR/${ARQUIVO}.tmp" "$BACKUP_DIR/$ARQUIVO"

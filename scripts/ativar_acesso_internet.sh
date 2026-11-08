@@ -32,13 +32,14 @@ command -v mysql >/dev/null  || erro "mysql (cliente) não encontrado — o mód
 command -v php   >/dev/null  || erro "php não encontrado."
 command -v perl  >/dev/null  || erro "perl não encontrado (o helper do Squid usa perl)."
 
-set -a; . "$RAIZ/.env"; set +a
+source "$RAIZ/scripts/ler_env.sh"
+gwos_ler_env "$RAIZ/.env"
 DB_HOST="${DB_HOST:-127.0.0.1}"; DB_BANCO="${DB_BANCO:-gwos}"; DB_USUARIO="${DB_USUARIO:-gwos}"; DB_SENHA="${DB_SENHA:-}"
 MYSQL=(mysql -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" "$DB_BANCO")
 
 # 1. Banco ------------------------------------------------------------------
 info "Aplicando a migração do banco..."
-for mig in "$RAIZ"/database/migrations/002_acesso_internet.sql "$RAIZ"/database/migrations/004_operacional_v2.sql "$RAIZ"/database/migrations/005_trafego_direcional.sql "$RAIZ"/database/migrations/006_historico_sessoes.sql "$RAIZ"/database/migrations/007_importacao_squid_idempotente.sql "$RAIZ"/database/migrations/008_liberacao_temporaria.sql; do
+for mig in "$RAIZ"/database/migrations/002_acesso_internet.sql "$RAIZ"/database/migrations/004_operacional_v2.sql "$RAIZ"/database/migrations/005_trafego_direcional.sql "$RAIZ"/database/migrations/006_historico_sessoes.sql "$RAIZ"/database/migrations/007_importacao_squid_idempotente.sql "$RAIZ"/database/migrations/008_liberacao_temporaria.sql "$RAIZ"/database/migrations/009_fila_expiracao.sql; do
     [ -f "$mig" ] || continue
     "${MYSQL[@]}" < "$mig" || erro "Falha ao aplicar $(basename "$mig")."
 done

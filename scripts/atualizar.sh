@@ -2,16 +2,16 @@
 # GWOS — atualizador. Faz tudo o que é preciso para subir uma versão nova:
 #   valida o pacote → backup → copia o código (preserva .env e storage) →
 #   verifica a sintaxe → reaplica os módulos instalados (migrations, cron,
-#   sudoers) → confere → e VOLTA ATRÁS sozinho se algo falhar.
+#   sudoers) → confere → restaura o snapshot de arquivos em caso de falha.
 #
 # Uso (como root, no servidor):
 #   bash atualizar.sh                         # procura o pacote sozinho (veja abaixo)
-#   bash atualizar.sh /caminho/GWOS-v2.0.1-dev.zip
+#   bash atualizar.sh /caminho/GWOS-v2.0.2-dev.zip
 #   bash atualizar.sh /caminho/pasta-descompactada
 #
 # Sem argumento, procura o pacote novo (GWOS*.zip, o mais recente, ou uma pasta
 # com app/ e modulos/) em: a pasta do próprio script, a pasta da instalação e as
-# subpastas atualizacao/ e novo/, /root, o diretório atual e o diretório atual. Se o script
+# subpastas atualizacao/ e novo/, /root, o diretório atual. Se o script
 # estiver dentro de um pacote recém-extraído (sem .env), esse pacote é a origem.
 # Opções:
 #   --dir /opt/gwos        diretório da instalação (detecta sozinho se omitido)
@@ -19,7 +19,7 @@
 #   --sem-modulos          só copia o código (não reaplica módulos)
 #   --simular              mostra o que faria, sem alterar nada
 #   --sim                  não pergunta confirmação
-set -euo pipefail
+set -Eeuo pipefail
 umask 022
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; B='\033[1m'; N='\033[0m'
@@ -94,7 +94,7 @@ if [ -z "$ORIGEM" ]; then
     if [ -z "$MELHOR" ]; then
         falha "Não achei nenhum pacote GWOS*.zip nem pasta de atualização."
         echo "  Coloque o ZIP em ${DESTINO}/atualizacao/ (ou em /root) e rode de novo, ou informe o caminho:"
-        echo "    bash atualizar.sh /caminho/GWOS-v2.0.1-dev.zip"
+        echo "    bash atualizar.sh /caminho/GWOS-v2.0.2-dev.zip"
         exit 1
     fi
     ORIGEM="$MELHOR"
@@ -121,7 +121,7 @@ elif [ -d "$ORIGEM" ]; then
 else
     falha "Não encontrei: $ORIGEM"; exit 1
 fi
-for f in app/Core/Router.php routes/web.php modulos/comum/lib.sh database/schema.sql config/config.php; do
+for f in app/Core/Router.php routes/web.php modulos/comum/lib.sh database/schema.sql config/config.php scripts/backup.sh scripts/ler_env.sh; do
     [ -f "$NOVO/$f" ] || { falha "Pacote inválido: falta $f"; exit 1; }
 done
 VERSAO_NOVA="$(grep -o "'versao' *=> *'[^']*'" "$NOVO/config/config.php" | sed "s/.*=> *'//;s/'//" || true)"
@@ -158,26 +158,66 @@ fi
 # ── 3. Backup ──────────────────────────────────────────────────────────
 command -v rsync >/dev/null || { info "Instalando rsync..."; apt-get install -y -qq rsync >/dev/null; }
 BKP_BASE=/var/lib/gwos/atualizacoes; mkdir -p "$BKP_BASE"; chmod 700 "$BKP_BASE"
-BKP="$BKP_BASE/antes_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$BKP"
+BKP="$(mktemp -d "$BKP_BASE/antes_$(date +%Y%m%d_%H%M%S)_XXXXXX")"
 rsync -a --exclude 'storage/tarefas/' "$DESTINO/" "$BKP/codigo/"
-[ -d /etc/gwos ] && cp -a /etc/gwos "$BKP/etc-gwos"
-[ -f /etc/cron.d/gwos ] && cp -a /etc/cron.d/gwos "$BKP/cron-gwos"
+# Snapshot dos arquivos gerenciados pelos módulos reaplicados.
+DIRS_ESTADO=(/etc/gwos /etc/nginx/sites-available /etc/nginx/sites-enabled)
+ARQS_ESTADO=(/etc/cron.d/gwos /etc/sudoers /etc/sudoers.d/gwos
+    /usr/local/bin/gwos /usr/local/sbin/gwos-gerar-nginx /usr/local/sbin/gwos-gerar-portal-acesso)
+for caminho in "${DIRS_ESTADO[@]}" "${ARQS_ESTADO[@]}"; do
+    if [ -e "$caminho" ] || [ -L "$caminho" ]; then
+        cp -a --parents "$caminho" "$BKP"
+    fi
+done
 ok "Cópia do código e da configuração em ${BKP}"
-if [ "$SEM_BKP_BANCO" -eq 0 ] && [ -x "$DESTINO/scripts/backup.sh" ] && [ -f "$DESTINO/.env" ]; then
-    if bash "$DESTINO/scripts/backup.sh" >>"$LOG" 2>&1; then ok "Backup do banco concluído (/var/lib/gwos/backups)."
-    else falha "Backup do banco falhou. Corrija ou use --sem-backup-banco (por sua conta e risco)."; exit 1; fi
+if [ "$SEM_BKP_BANCO" -eq 0 ] && [ -f "$DESTINO/.env" ]; then
+    # Usa o leitor literal da versão nova também no backup pré-atualização.
+    mkdir -p "$TMP/backup/scripts"
+    cp "$NOVO/scripts/"{backup,ler_env}.sh "$TMP/backup/scripts/"
+    install -m 0600 "$DESTINO/.env" "$TMP/backup/.env"
+    if bash "$TMP/backup/scripts/backup.sh" >>"$LOG" 2>&1; then
+        ok "Backup do banco concluído (/var/lib/gwos/backups)."
+    else
+        falha "Backup do banco falhou. Corrija ou use --sem-backup-banco."; exit 1
+    fi
 else
-    aviso "Backup do banco ignorado (sem .env/backup.sh ou --sem-backup-banco)."
+    aviso "Backup do banco ignorado (sem .env ou --sem-backup-banco)."
 fi
 
 reverter() {
-    falha "Falha na atualização. Voltando ao estado anterior..."
-    rsync -a --delete --exclude '.env' --exclude 'storage/' "$BKP/codigo/" "$DESTINO/" || true
-    [ -f "$BKP/cron-gwos" ] && cp -a "$BKP/cron-gwos" /etc/cron.d/gwos || true
-    for s in $(systemctl list-units --no-legend 'php*-fpm.service' 2>/dev/null | awk '{print $1}'); do systemctl restart "$s" 2>/dev/null || true; done
-    aviso "Código e cron restaurados de ${BKP}. As migrations do banco são só aditivas e não precisam ser desfeitas."
-    aviso "Detalhes em ${LOG}."
+    trap - ERR
+    falha "Falha na atualização. Restaurando os arquivos do snapshot..."
+    local falhou=0 caminho unidade
+    rsync -a --delete --exclude 'storage/' "$BKP/codigo/" "$DESTINO/" || falhou=1
+    if [ -f "$DESTINO/.env" ]; then
+        chown root:www-data "$DESTINO/.env" && chmod 0640 "$DESTINO/.env" || falhou=1
+    fi
+    if [ "$SEM_MODULOS" -eq 0 ]; then
+        for caminho in "${DIRS_ESTADO[@]}"; do
+            if [ -d "$BKP$caminho" ]; then
+                rsync -a --delete "$BKP$caminho/" "$caminho/" || falhou=1
+            fi
+        done
+        for caminho in "${ARQS_ESTADO[@]}"; do
+            if [ -e "$BKP$caminho" ] || [ -L "$BKP$caminho" ]; then
+                cp -a --remove-destination "$BKP$caminho" "$caminho" || falhou=1
+            else
+                rm -f -- "$caminho" || falhou=1
+            fi
+        done
+        if systemctl is-active --quiet nginx; then
+            nginx -t >>"$LOG" 2>&1 && systemctl reload nginx >>"$LOG" 2>&1 || falhou=1
+        fi
+    fi
+    for unidade in $(systemctl list-units --no-legend 'php*-fpm.service' 2>/dev/null | awk '{print $1}'); do
+        systemctl restart "$unidade" >>"$LOG" 2>&1 || falhou=1
+    done
+    if [ "$falhou" -eq 0 ]; then
+        aviso "Arquivos do snapshot restaurados de ${BKP}."
+    else
+        falha "Reversão incompleta. Confira o snapshot em ${BKP} e o log."
+    fi
+    aviso "O banco mantém as migrations executadas. Detalhes em ${LOG}."
     exit 1
 }
 trap 'reverter' ERR
@@ -188,7 +228,15 @@ rsync -a --exclude '.env' --exclude 'storage/' --exclude 'docs/capturas/' "$NOVO
 mkdir -p "$DESTINO/storage/tarefas"
 chmod +x "$DESTINO"/scripts/*.sh "$DESTINO"/modulos/*.sh "$DESTINO"/modulos/*/*.sh 2>/dev/null || true
 if id www-data >/dev/null 2>&1; then
-    chown -R www-data:www-data "$DESTINO/public" "$DESTINO/storage" 2>/dev/null || true
+    chown root:root "$DESTINO"
+    chmod go-w "$DESTINO"
+    chown -R root:root "$DESTINO/public"
+    chmod -R go-w "$DESTINO/public"
+    chown -R www-data:www-data "$DESTINO/storage"
+    if [ -f "$DESTINO/.env" ]; then
+        chown root:www-data "$DESTINO/.env"
+        chmod 0640 "$DESTINO/.env"
+    fi
 fi
 ok "Código atualizado."
 
@@ -214,11 +262,10 @@ else
 fi
 
 # ── 6. Confere ─────────────────────────────────────────────────────────
-trap - ERR
 cd "$DESTINO"
 if command -v php >/dev/null && [ -f .env ]; then
     php -r 'chdir($argv[1]); require "bootstrap/app.php"; echo "bootstrap OK\n";' "$DESTINO" >>"$LOG" 2>&1 \
-        && ok "Aplicação carrega sem erro." || { trap 'reverter' ERR; false; }
+        && ok "Aplicação carrega sem erro." || { false; }
 fi
 if [ -x modulos/verificar-todos.sh ] && [ "$SEM_MODULOS" -eq 0 ]; then
     bash modulos/verificar-todos.sh 2>&1 | tee -a "$LOG" | tail -25 || aviso "verificar-todos.sh apontou itens; veja acima."
@@ -229,6 +276,7 @@ if [ -n "$URL" ] && command -v curl >/dev/null; then
     [ "$cod" = "200" ] && ok "Painel respondeu 200 em ${URL%/}/login" || aviso "Painel respondeu '${cod:-sem resposta}' em ${URL%/}/login — confira."
 fi
 
+trap - ERR
 echo ""
 ok "Atualização concluída: ${VERSAO_ATUAL:-?} → ${VERSAO_NOVA:-?}"
 echo -e "  Backup (código/config): ${B}${BKP}${N}"

@@ -6,9 +6,10 @@ set -euo pipefail
 umask 077
 
 GWOS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -f "$GWOS_DIR/.env" ]; then set -a; source "$GWOS_DIR/.env"; set +a; fi
+source "$GWOS_DIR/scripts/ler_env.sh"
+gwos_ler_env "$GWOS_DIR/.env"
 
-ARQUIVO="$1"
+ARQUIVO="${1:?Informe o arquivo de backup}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_BANCO="${DB_BANCO:-gwos}"
 DB_USUARIO="${DB_USUARIO:-gwos}"
@@ -48,7 +49,7 @@ for CHAVE in iface_wan iface_lan rede_lan ip_gateway; do
 done
 
 # Restaurar banco
-[ -f "$TMP/banco.sql" ] && mysql -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" "$DB_BANCO" < "$TMP/banco.sql"
+[ -f "$TMP/banco.sql" ] && mysql --binary-mode -h"$DB_HOST" -u"$DB_USUARIO" -p"$DB_SENHA" "$DB_BANCO" < "$TMP/banco.sql"
 
 # Reaplica as chaves de rede atuais (não podem vir do backup)
 for CHAVE in iface_wan iface_lan rede_lan ip_gateway; do

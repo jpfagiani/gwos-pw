@@ -79,14 +79,22 @@ else
 
 fi
 
-# Migrações também rodam em banco já existente para atualizar VMs instaladas.
-# Os arquivos da pasta migrations são idempotentes; qualquer erro real interrompe
-# a atualização para não deixar o painel com esquema parcialmente atualizado.
+# Registra somente migrações concluídas. Na primeira atualização de uma
+# instalação antiga, os arquivos idempotentes são reconciliados uma vez.
 if [ -n "${REPO:-}" ] && [ -d "${REPO}/database/migrations" ]; then
+    mysql gwos -e 'CREATE TABLE IF NOT EXISTS gwos_migrations (
+        arquivo VARCHAR(150) NOT NULL PRIMARY KEY,
+        aplicado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB' || erro "Não foi possível criar o registro de migrações."
     for mig in "${REPO}/database/migrations/"*.sql; do
         [ -f "$mig" ] || continue
-        mysql gwos < "$mig" || erro "Falha na migração $(basename "$mig"); veja o erro SQL acima."
-        ok "Migração aplicada/confirmada: $(basename "$mig")"
+        nome_mig=$(basename "$mig")
+        [[ "$nome_mig" =~ ^[0-9]+_[a-z0-9_]+\.sql$ ]] || erro "Nome de migração inválido: $nome_mig"
+        aplicado=$(mysql -Nse "SELECT 1 FROM gwos_migrations WHERE arquivo='$nome_mig'" gwos)             || erro "Não foi possível consultar o registro de migrações."
+        [ "$aplicado" = 1 ] && continue
+        mysql gwos < "$mig" || erro "Falha na migração $nome_mig; veja o erro SQL acima."
+        mysql gwos -e "INSERT INTO gwos_migrations (arquivo) VALUES ('$nome_mig')"             || erro "Não foi possível registrar $nome_mig."
+        ok "Migração aplicada: $nome_mig"
     done
 fi
 
@@ -120,8 +128,10 @@ DB_USUARIO=gwos
 DB_SENHA=${DB_SENHA}
 ENV
     fi
-    chmod 600 "${REPO}/.env"
-    chown www-data:www-data "${REPO}/.env" 2>/dev/null || true
+    chown root:root "$REPO"
+    chmod go-w "$REPO"
+    chown root:www-data "${REPO}/.env"
+    chmod 0640 "${REPO}/.env"
     ok "${REPO}/.env atualizado."
 fi
 

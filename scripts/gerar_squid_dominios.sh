@@ -6,7 +6,8 @@
 set -euo pipefail
 
 GWOS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -f "$GWOS_DIR/.env" ]; then set -a; source "$GWOS_DIR/.env"; set +a; fi
+source "$GWOS_DIR/scripts/ler_env.sh"
+gwos_ler_env "$GWOS_DIR/.env"
 
 NO_RECONFIGURE=0
 [[ "${1:-}" == "--no-reconfigure" ]] && NO_RECONFIGURE=1
