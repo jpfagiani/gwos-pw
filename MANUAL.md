@@ -4,7 +4,7 @@
 
 - **IP do gateway:** escolhido no assistente de instalação
 - **Painel web:** `http://<IP_DO_GATEWAY>:8080` (porta 8080 por convenção — a 80 fica para o portal de sistemas)
-- **Login inicial:** `admin@gwos.local`; a senha aleatória é exibida uma vez no console do instalador.
+- **Login inicial:** `admin@gwos.local`; a senha é a que você digita durante a instalação do módulo do painel.
 
 ---
 
@@ -48,7 +48,7 @@ O instalador pergunta:
   Exemplo: GWOS em `10.14.29.10` + alias `172.14.29.254` para alcançar uma rede antiga/outra unidade em `172.14.29.0/24`
 - Configuração da WAN (DHCP ou IP estático)
 
-Ao final, exibe a URL e o login. A senha inicial aleatória aparece uma vez no console do módulo do painel.
+Ao final, exibe a URL e o login. A senha do administrador é pedida (oculta, com confirmação) durante a instalação do módulo do painel.
 
 ### Rede secundária — quando usar
 
@@ -313,7 +313,13 @@ confirmação do e-mail, então digitar o e-mail de outra pessoa não adianta.
 **Esqueci minha senha:** mesmo caminho, com link novo (vale 30 min, uso único).
 O link do cadastro vale 24 h. Cinco senhas erradas bloqueiam a conta por 15 min.
 
-**E-mail (SMTP).** Configure em *Configurações* as chaves `smtp_host`, `smtp_porta`,
+**Sem depender de e-mail (v2.0.1).** Em *Acesso com login* o administrador pode:
+- **Cadastrar usuário** digitando nome, e-mail institucional e a **senha inicial** — o usuário já entra confirmado;
+- **Senha** (por usuário): define/redefine a senha digitando; encerra as sessões abertas dele;
+- **Link**: gera um link de uso único (24 h para cadastro novo, 30 min para redefinição) para repassar ao usuário criar a própria senha.
+Se o SMTP estiver fora do ar, o cadastro/“esqueci a senha” do portal avisa o usuário para procurar o administrador, em vez de fingir que enviou.
+
+**E-mail (SMTP).** Configure em *Acesso com login > Envio de e-mail* (ou *Configurações*) as chaves `smtp_host`, `smtp_porta`,
 `smtp_seguranca` (`nenhuma`, `starttls` ou `ssl`), `smtp_usuario`, `smtp_senha` e
 `smtp_remetente` (padrão: servidor `10.14.5.16`, porta 25, sem autenticação). Teste em
 *Acesso com login > Enviar e-mail de teste*. Sem SMTP funcionando ninguém consegue
@@ -519,7 +525,7 @@ gwos <comando> [opções]
 ### Gerenciar senha do painel
 
 ```bash
-# Gerar senha temporária aleatória e exibi-la uma vez no console
+# Redefinir pedindo a senha no terminal (sem eco, com confirmação)
 gwos senha admin@gwos.local
 
 # Resetar para senha personalizada

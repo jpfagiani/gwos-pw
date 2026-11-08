@@ -1,5 +1,55 @@
 # Instruções de atualização e validação
 
+## Jeito automático (recomendado)
+
+Envie o `GWOS-v2.0.1-dev.zip` ao servidor e rode como root:
+
+```
+# primeira vez: extraia só o script (ou o pacote todo) e execute
+unzip -o GWOS-v2.0.1-dev.zip scripts/atualizar.sh -d /root/gwos-upd
+bash /root/gwos-upd/scripts/atualizar.sh /caminho/GWOS-v2.0.1-dev.zip
+# depois da primeira vez, também funciona:  gwos atualizar /caminho/GWOS-vX.zip
+```
+
+O script detecta a instalação, valida o pacote (ZIP e sintaxe PHP/shell, antes de alterar qualquer coisa), faz backup do código, da configuração e do banco, copia o código preservando `.env` e `storage/`, reaplica os módulos de banco e painel (migrations, cron, sudoers), confere se a aplicação carrega e se o painel responde, e **volta ao estado anterior sozinho** se algo falhar. Opções: `--simular` (só mostra o que mudaria), `--sim` (sem confirmação), `--dir /opt/gwos`, `--sem-backup-banco`, `--sem-modulos`. Log: `/var/log/gwos-atualizacao.log`; backups: `/var/lib/gwos/atualizacoes/`. Módulos de rede (DNS, firewall, proxy, hora) não são reinstalados.
+
+## Atualizar manualmente (passo a passo)
+
+Faça primeiro em uma VM de laboratório (ou com snapshot) e mantenha acesso ao console. Os comandos abaixo supõem que o GWOS está em `/opt/gwos`; ajuste se o seu estiver em outro diretório (`readlink -f /usr/local/bin/gwos` mostra o caminho).
+
+1. **Backup** (no servidor, como root):
+   ```
+   cd /opt/gwos && ./scripts/backup.sh          # ou: gwos backup
+   cp -a /opt/gwos /root/gwos-antes-v2.0.0
+   ```
+   Se for VM, tire também um snapshot.
+2. **Enviar o pacote** `GWOS-v2.0.1-dev.zip` para o servidor (scp, WinSCP ou pen drive) e extrair em uma pasta temporária:
+   ```
+   apt-get install -y unzip
+   mkdir /root/gwos-novo && unzip GWOS-v2.0.1-dev.zip -d /root/gwos-novo
+   ```
+3. **Copiar o código novo por cima, preservando a configuração** (`.env` e `storage/` não são sobrescritos):
+   ```
+   rsync -a --exclude '.env' --exclude 'storage/' /root/gwos-novo/ /opt/gwos/
+   ```
+4. **Reaplicar os módulos do banco e do painel.** Isso roda as migrations (inclusive a nova 008), atualiza cron, permissões e sudoers e reinicia o PHP-FPM:
+   ```
+   cd /opt/gwos/modulos
+   bash 10-banco-mariadb/instalar.sh
+   bash 60-painel-web/instalar.sh
+   ```
+   Contas de administrador já personalizadas são preservadas e **nenhuma senha é pedida**. A senha só é pedida se a conta ainda estiver com a senha de fábrica ou não existir (use `GWOS_ADMIN_SENHA` para modo sem terminal).
+5. **Conferir:**
+   ```
+   bash /opt/gwos/modulos/verificar-todos.sh
+   ```
+   Abra o painel, entre, veja **Diagnóstico** e o **Histórico de tarefas**. Dê 2 a 3 minutos para os coletores (cron) gravarem as primeiras amostras de tráfego.
+6. **Teste de fumaça das ações rápidas:** em um PC de teste, use *Liberar temporário* por 5 minutos e confirme que o acesso muda e depois volta. Não teste em equipamentos críticos.
+
+**Voltar atrás:** restaure `/root/gwos-antes-v2.0.0` sobre `/opt/gwos` (ou o snapshot) e rode `bash 60-painel-web/instalar.sh`. A migration 008 só adiciona duas colunas em `ips`; o código antigo as ignora.
+
+---
+
 ## Situação desta entrega
 
 Esta cópia contém alterações em PHP, shell, JavaScript e schema. A origem ZIP foi preservada. Não execute os instaladores no servidor de produção antes de revisar a cópia em ambiente de laboratório.
@@ -14,7 +64,7 @@ Esta cópia contém alterações em PHP, shell, JavaScript e schema. A origem ZI
 
 ## Banco
 
-Aplicar migrations em ordem, incluindo `003_remover_credencial_padrao.sql`, `004_operacional_v2.sql`, `005_trafego_direcional.sql`, `006_historico_sessoes.sql` e `007_importacao_squid_idempotente.sql`. A migration 005 inclui bytes direcionais, metadados de lease/interface e o limite de sessões do portal; o módulo `10-banco-mariadb` percorre migrations idempotentes quando reaplicado. A migration 003 remove apenas a conta cujo hash é exatamente o legado conhecido. O instalador do painel cria uma conta inicial com senha aleatória de uso único ou preserva os administradores existentes. Novas instalações não recebem senha fixa no schema.
+Aplicar migrations em ordem, incluindo `003_remover_credencial_padrao.sql`, `004_operacional_v2.sql`, `005_trafego_direcional.sql`, `006_historico_sessoes.sql`, `007_importacao_squid_idempotente.sql` e `008_liberacao_temporaria.sql`. A migration 005 inclui bytes direcionais, metadados de lease/interface e o limite de sessões do portal; o módulo `10-banco-mariadb` percorre migrations idempotentes quando reaplicado. A migration 003 remove apenas a conta cujo hash é exatamente o legado conhecido. O instalador do painel pede a senha do administrador (digitada por quem instala) ao criar a conta, ou preserva os administradores existentes. Novas instalações não recebem senha fixa no schema.
 
 ## Configuração
 
@@ -58,4 +108,4 @@ Os scripts de firewall e troca de IP têm snapshot e tentativa de rollback autom
 
 ## Migrações do relatório mestre v2.0
 
-Para atualizar uma instalação existente a partir do pacote v2.0-dev, faça backup do banco e execute em ordem as migrations ainda não aplicadas. A migration `006_historico_sessoes.sql` cria o histórico que alimenta a seção “Histórico de sessões encerradas”; ele começa a registrar encerramentos após a atualização e não recupera sessões antigas. A migration `007_importacao_squid_idempotente.sql` adiciona uma chave por linha para impedir duplicação quando o importador reprocessa o log. O código atual também grava o grupo mais específico no momento do login; sessões ativas anteriores à migration não têm esse snapshot. O script `scripts/ativar_acesso_internet.sh` aplica as migrations 002 e 004–007. Não execute novamente migrations antigas que alterem credenciais/configurações sem conferir os avisos de cada arquivo.
+Para atualizar uma instalação existente a partir do pacote v2.0-dev, faça backup do banco e execute em ordem as migrations ainda não aplicadas. A migration `006_historico_sessoes.sql` cria o histórico que alimenta a seção “Histórico de sessões encerradas”; ele começa a registrar encerramentos após a atualização e não recupera sessões antigas. A migration `007_importacao_squid_idempotente.sql` adiciona uma chave por linha para impedir duplicação quando o importador reprocessa o log. O código atual também grava o grupo mais específico no momento do login; sessões ativas anteriores à migration não têm esse snapshot. O script `scripts/ativar_acesso_internet.sh` aplica as migrations 002 e 004–008. Não execute novamente migrations antigas que alterem credenciais/configurações sem conferir os avisos de cada arquivo.

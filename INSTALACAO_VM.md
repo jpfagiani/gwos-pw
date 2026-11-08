@@ -52,8 +52,9 @@ antes de confirmar cada módulo. Para o painel completo, mantenha selecionados
 os módulos `10-banco-mariadb` e `60-painel-web`; para funções de gateway,
 mantenha também DNS, firewall e proxy.
 
-Anote a senha inicial mostrada uma única vez pelo instalador do painel. No
-primeiro acesso ela exige troca.
+Durante o módulo do painel, o instalador pede que você digite a senha do
+administrador (`admin@gwos.local`) duas vezes, sem eco. Use a que escolher aqui
+para entrar. Para instalar sem terminal: `GWOS_ADMIN_SENHA='...' bash modulos/instalar-todos.sh`.
 
 ## 4. Acessar e conferir
 
@@ -93,7 +94,7 @@ certificado de CA instalados no laboratório.
   histórico.
 - Faça backup e restaure em uma VM descartável antes de confiar na recuperação.
 - Verifique regras, DNS, acesso HTTP/HTTPS, comportamento dos grupos e logs.
-- Tire um novo snapshot da VM somente depois de guardar a senha inicial,
+- Tire um novo snapshot da VM somente depois de confirmar o login com a senha que você definiu,
   registrar os endereços escolhidos e confirmar o acesso pelo console.
 
 Se algum módulo falhar, não conecte a VM a uma rede de produção. Restaure o

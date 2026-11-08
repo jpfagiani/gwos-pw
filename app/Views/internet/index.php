@@ -11,6 +11,29 @@
     (em <a href="/grupos">Grupos</a>): ele navega livremente e continua aparecendo no registro de acessos.
 </div>
 
+<?php if (!empty($linkGerado)): ?>
+<div class="alert alert-success">
+    <div class="fw-semibold mb-1"><i class="bi bi-link-45deg"></i> Link para <?= h($linkGerado['email']) ?> (vale <?= (int) $linkGerado['minutos'] >= 60 ? (int) ($linkGerado['minutos'] / 60) . ' h' : (int) $linkGerado['minutos'] . ' min' ?>, uso único)</div>
+    <input type="text" readonly class="form-control form-control-sm font-monospace" value="<?= h($linkGerado['link']) ?>" onclick="this.select()">
+    <div class="small mt-1">Repasse ao usuário. Esta mensagem não aparece de novo.</div>
+</div>
+<?php endif; ?>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white fw-semibold"><i class="bi bi-person-plus me-1"></i>Cadastrar usuário (admin digita a senha)</div>
+    <div class="card-body">
+        <form method="POST" action="/internet/usuarios" class="row g-2 align-items-end" autocomplete="off">
+            <?= csrf_field() ?>
+            <div class="col-md-3"><label class="form-label small fw-semibold mb-1">Nome completo</label><input name="nome" class="form-control form-control-sm" required minlength="3"></div>
+            <div class="col-md-3"><label class="form-label small fw-semibold mb-1">E-mail (@<?= h($dominio) ?>)</label><input type="email" name="email" class="form-control form-control-sm" required></div>
+            <div class="col-md-2"><label class="form-label small fw-semibold mb-1">Senha</label><input type="password" name="senha" class="form-control form-control-sm" required minlength="8" autocomplete="new-password"></div>
+            <div class="col-md-2"><label class="form-label small fw-semibold mb-1">Confirmar</label><input type="password" name="confirmar" class="form-control form-control-sm" required minlength="8" autocomplete="new-password"></div>
+            <div class="col-md-2"><button class="btn btn-sm btn-primary w-100"><i class="bi bi-check2 me-1"></i>Criar</button></div>
+        </form>
+        <div class="form-text">Mínimo 8 caracteres, com letras e números. O usuário já entra confirmado, sem depender de e-mail.</div>
+    </div>
+</div>
+
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white fw-semibold">Sessões ativas (<?= count($sessoes) ?>)</div>
     <div class="table-responsive">
@@ -62,6 +85,12 @@
                     <td><?= $u['ultimo_login'] ? h(date('d/m/Y H:i', strtotime($u['ultimo_login']))) : '—' ?></td>
                     <td><?= h(date('d/m/Y', strtotime($u['criado_em']))) ?></td>
                     <td class="text-end text-nowrap">
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalSenha"
+                                data-id="<?= (int) $u['id'] ?>" data-email="<?= h($u['email']) ?>"><i class="bi bi-key"></i> Senha</button>
+                        <form method="POST" action="/internet/usuarios/<?= (int) $u['id'] ?>/link" class="d-inline">
+                            <?= csrf_field() ?>
+                            <button class="btn btn-sm btn-outline-primary" title="Gerar link para o usuário criar a própria senha"><i class="bi bi-link-45deg"></i> Link</button>
+                        </form>
                         <form method="POST" action="/internet/usuarios/<?= (int) $u['id'] ?>/alternar" class="d-inline">
                             <?= csrf_field() ?>
                             <button class="btn btn-sm btn-outline-secondary"><?= (int) $u['ativo'] ? 'Desativar' : 'Ativar' ?></button>
@@ -79,17 +108,53 @@
     </div>
 </div>
 
+<div class="modal fade" id="modalSenha" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><form method="POST" class="modal-content" id="formSenha" autocomplete="off">
+    <?= csrf_field() ?>
+    <div class="modal-header"><h6 class="modal-title">Definir senha — <span id="senhaEmail"></span></h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <label class="form-label small fw-semibold">Nova senha</label><input type="password" name="senha" class="form-control mb-2" required minlength="8" autocomplete="new-password">
+      <label class="form-label small fw-semibold">Confirmar</label><input type="password" name="confirmar" class="form-control" required minlength="8" autocomplete="new-password">
+      <div class="form-text">As sessões abertas desse usuário serão encerradas.</div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-primary btn-sm">Salvar senha</button></div>
+  </form></div>
+</div>
+<script>
+document.getElementById('modalSenha').addEventListener('show.bs.modal', function (e) {
+  var b = e.relatedTarget;
+  document.getElementById('formSenha').action = '/internet/usuarios/' + b.dataset.id + '/senha';
+  document.getElementById('senhaEmail').textContent = b.dataset.email;
+});
+</script>
+
 <div class="card border-0 shadow-sm">
-    <div class="card-header bg-white fw-semibold">Envio de e-mail (SMTP <?= h($smtp['host'] ?: 'não configurado') ?>:<?= h($smtp['porta']) ?>)</div>
+    <div class="card-header bg-white fw-semibold"><i class="bi bi-envelope me-1"></i>Envio de e-mail (SMTP)
+        <?php if ($smtp['host'] === ''): ?><span class="badge bg-warning text-dark ms-2">não configurado</span><?php endif; ?></div>
     <div class="card-body">
-        <form method="POST" action="/internet/teste-email" class="row g-2 align-items-end">
+        <form method="POST" action="/internet/smtp" class="row g-2 align-items-end mb-3" autocomplete="off">
+            <?= csrf_field() ?>
+            <div class="col-md-3"><label class="form-label small fw-semibold mb-1">Servidor</label><input name="host" class="form-control form-control-sm" value="<?= h($smtp['host']) ?>" placeholder="smtp.exemplo.gov.br"></div>
+            <div class="col-md-1"><label class="form-label small fw-semibold mb-1">Porta</label><input name="porta" class="form-control form-control-sm" value="<?= h($smtp['porta']) ?>"></div>
+            <div class="col-md-2"><label class="form-label small fw-semibold mb-1">Segurança</label>
+                <select name="seguranca" class="form-select form-select-sm">
+                    <?php foreach (['nenhuma' => 'Nenhuma', 'starttls' => 'STARTTLS', 'ssl' => 'SSL/TLS'] as $k => $r): ?>
+                        <option value="<?= $k ?>" <?= $smtp['seguranca'] === $k ? 'selected' : '' ?>><?= $r ?></option>
+                    <?php endforeach; ?>
+                </select></div>
+            <div class="col-md-2"><label class="form-label small fw-semibold mb-1">Usuário</label><input name="usuario" class="form-control form-control-sm" value="<?= h($smtp['usuario']) ?>"></div>
+            <div class="col-md-2"><label class="form-label small fw-semibold mb-1">Senha</label><input type="password" name="senha" class="form-control form-control-sm" placeholder="<?= $smtp['tem_senha'] ? '(mantida)' : '' ?>" autocomplete="new-password"></div>
+            <div class="col-md-2"><label class="form-label small fw-semibold mb-1">Remetente</label><input name="remetente" class="form-control form-control-sm" value="<?= h($smtp['remetente']) ?>" placeholder="internet@<?= h($dominio) ?>"></div>
+            <div class="col-12"><button class="btn btn-sm btn-primary"><i class="bi bi-save me-1"></i>Salvar e-mail</button></div>
+        </form>
+        <form method="POST" action="/internet/teste-email" class="row g-2 align-items-end border-top pt-3">
             <?= csrf_field() ?>
             <div class="col-sm-6">
                 <label class="form-label small fw-semibold mb-1">Enviar e-mail de teste para</label>
                 <input type="email" name="para" class="form-control form-control-sm" placeholder="voce@<?= h($dominio) ?>" required>
             </div>
-            <div class="col-sm-auto"><button class="btn btn-sm btn-primary"><i class="bi bi-send me-1"></i>Testar</button></div>
+            <div class="col-sm-auto"><button class="btn btn-sm btn-outline-primary"><i class="bi bi-send me-1"></i>Testar</button></div>
         </form>
-        <div class="form-text mt-2">Servidor, porta, segurança, usuário e remetente ficam em <a href="/configuracoes">Configurações</a> (chaves <code>smtp_*</code>).</div>
+        <div class="form-text mt-2">Sem e-mail funcionando, use "Cadastrar usuário" ou o botão "Link" na lista.</div>
     </div>
 </div>

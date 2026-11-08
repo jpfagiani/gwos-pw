@@ -1,7 +1,14 @@
 # Changelog de implementação
 
-Versão de entrega: `0.2.0-dev` (não homologada em produção)  
+Versão de entrega: `2.0.1-dev` (não homologada em produção)  
 Data: 06/11/2026
+
+## v2.0.1-dev — portal de senha de internet sem depender de e-mail
+
+- Admin cadastra usuário de internet com senha digitada (entra já confirmado), define/redefine senha (encerra sessões) e gera link de uso único.
+- Cadastro/“esqueci a senha” avisa quando o SMTP falha (antes mostrava sucesso sem enviar nada).
+- Tela de SMTP em *Acesso com login* (servidor, porta, segurança, usuário, senha, remetente) + e-mail de teste; alterações vão para histórico e auditoria.
+- Filtro “Decisão” do Monitoramento não fica mais cortado.
 
 ## Segurança e acesso
 
@@ -12,7 +19,7 @@ Data: 06/11/2026
 - Sessões expiram após 30 minutos sem atividade ou no teto configurável de 8 horas.
 - Cada requisição administrativa revalida se a conta continua ativa e sincroniza o perfil atual da sessão.
 - Auditoria redige recursivamente campos com nomes de senha, token, segredo e chave privada antes de gravar `dados_antes/dados_depois`.
-- Schema deixa de semear a conta com senha fixa; migration 003 remove apenas a credencial legada conhecida, e o instalador provisiona/rotaciona a conta com senha aleatória de uso inicial exibida uma vez no console.
+- Schema deixa de semear a conta com senha fixa; migration 003 remove apenas a credencial legada conhecida, e o instalador **pede ao operador a senha do administrador** (oculta, confirmada, mín. 8) ao criar a conta ou substituir a senha de fábrica. Instalação automatizada: `GWOS_ADMIN_SENHA`. A senha escolhida não força nova troca.
 
 ## Monitoramento e interface
 
@@ -50,7 +57,7 @@ Data: 06/11/2026
 
 ## Banco e infraestrutura
 
-Schema de novas instalações alterado e migration `003_remover_credencial_padrao.sql` adicionada. O rollback não restaura uma credencial fixa: em laboratório, gere uma senha nova pela CLI `gwos senha <email>` e force troca no acesso. Instaladores, firewall, DNS, proxy, NAT, interfaces e serviços não foram executados nem alterados no host.
+Schema de novas instalações alterado e migration `003_remover_credencial_padrao.sql` adicionada. O rollback não restaura uma credencial fixa: em laboratório, defina uma senha pela CLI `gwos senha <email>` (pergunta no terminal). Instaladores, firewall, DNS, proxy, NAT, interfaces e serviços não foram executados nem alterados no host.
 
 ## Pendências
 
@@ -89,3 +96,13 @@ Timeout, confirmação e rollback automático precisam de teste integrado no Deb
 - Migration 007 adiciona `log_key` único por inode/geração/offset. Reprocessar o mesmo trecho depois de uma falha não duplica acessos. A geração é salva atomicamente antes da importação e a identificação usa `fstat` do arquivo aberto para cobrir rotação.
 - `parsear_logs.php` recalcula o agregado diário a partir da tabela canônica, em vez de somar novamente as últimas linhas do access.log. O script shell legado chama o mesmo recálculo e saiu do cron duplicado.
 - O relatório diário agora agrega os registros canônicos por data/IP/domínio diretamente.
+
+
+## v2.0.0-dev — layout e funções do Relatório Mestre v2.0 (07/11/2026)
+
+- **Design system** novo em `public/assets/css/gwos.css`; `layout.php` refeito: cabeçalho navy (marca, busca global, “Servidor Online” com pulso real via `/ping`, data/hora, sino de alertas, menu do usuário, tema escuro opcional), menu lateral com submenus na ordem do relatório (Dashboard, Monitoramento, Controle de Acesso, Ranking, Equipamentos, Políticas e Regras, Agenda, Alertas, Relatórios, Diagnóstico, Configurações, Ajuda) e rodapé.
+- **Dashboard** conforme a imagem de referência: Estado Geral, WAN, LAN (sparklines ao vivo), tráfego 24 h (faixas de 30 min a partir de `metricas_rede`; lacunas e contador reiniciado = sem dados), Top 10, alertas, acessos em tempo real, Controle Rápido, Simulador, Agenda, Equipamentos e Serviços (só módulos instalados).
+- **Login** do painel e **portal de internet** redesenhados (logins continuam separados).
+- **Ações rápidas** (`Politicas`, `PoliticaController`, `POST /politicas/acao`): alterar grupo, bloquear, liberar temporariamente (5 min a 7 dias, retorno automático à política anterior), revogar; prévia + confirmação, lote de até 50 IPs, auditoria, fila allowlisted. Migration `008_liberacao_temporaria.sql`; `expirar_politicas.php` restaura as regras suspensas. Disponível nas telas Dashboard, Equipamentos (lote), Ficha e Políticas; oculto e bloqueado (403) para o perfil operador.
+- Novas telas: **Políticas e Regras**, **Diagnóstico** (serviços, interfaces, coleta, recursos, backup), **Ajuda**, **Busca global**. Ranking com gráfico e períodos Hoje/Mês; Monitoramento com abas Bloqueios e Sessões.
+- Limite conhecido: a ação rápida atua só em regra de IP exato; a precedência final com redes CIDR é a do squid.conf/nftables e deve ser validada na VM.
