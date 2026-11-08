@@ -57,7 +57,10 @@ function csrf_verificar(): bool
         parse_str(file_get_contents('php://input'), $body);
         $token = $body['_csrf'] ?? '';
     }
-    return hash_equals($_SESSION['csrf_token'] ?? '', $token);
+    $esperado = $_SESSION['csrf_token'] ?? '';
+    return is_string($esperado) && $esperado !== ''
+        && is_string($token) && $token !== ''
+        && hash_equals($esperado, $token);
 }
 
 function csrf_field(): string
