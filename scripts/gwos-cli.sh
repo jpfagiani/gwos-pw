@@ -495,6 +495,7 @@ cmd_help() {
     echo "  dns del <host>               Remover host"
     echo ""
     echo -e "${B}Usuários/Senha:${N}"
+    echo "  atualizar <zip|pasta>        Atualiza o GWOS (backup, migrations, rollback automático)"
     echo "  senha <email> [nova_senha]   Redefinir senha (sem a senha na linha, pergunta no terminal)"
     echo "  senha listar                 Listar todos os admins"
     echo "  resetsenha <email>           Gerar token de reset e forçar troca"
@@ -719,6 +720,7 @@ case "$CMD" in
     dominio|domain)     cmd_dominio "$@" ;;
     log|logs)           cmd_log "$@" ;;
     backup)             cmd_backup "$@" ;;
+    atualizar)          exec bash "$GWOS_DIR/scripts/atualizar.sh" "$@" ;;
     diag|diagnostico)   cmd_diag ;;
     diag-painel)        bash "$GWOS_DIR/scripts/diagnostico_painel.sh" ;;
     dns)                cmd_dns "$@" ;;
